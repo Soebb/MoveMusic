@@ -31,6 +31,9 @@ class MainActivity : Activity() {
     private var currentPlaylist = "همه آهنگ‌ها"
     private var displayedSongCount = 50
     private var player: MediaPlayer? = null
+    private var playbackQueue: List<Song> = emptyList()
+    private var currentSongIndex = -1
+    private var shuffleEnabled = false
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
 
@@ -157,6 +160,11 @@ class MainActivity : Activity() {
         val visible = if (currentPlaylist == "همه آهنگ‌ها") songs
             else songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
         if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
+        body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
+            shuffleEnabled = !shuffleEnabled
+            refreshBody()
+            toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
+        })
         val page = visible.take(displayedSongCount)
         page.forEach { song ->
             val row = LinearLayout(this).apply {
@@ -259,15 +267,44 @@ class MainActivity : Activity() {
     }
 
     private fun play(song: Song) {
+        playbackQueue = if (currentPlaylist == "همه آهنگ‌ها") {
+            songs.toList()
+        } else {
+            songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
+        }
+        currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
+        startSong(song)
+    }
+
+    private fun startSong(song: Song) {
         try {
             player?.release()
             player = MediaPlayer().apply {
                 setDataSource(this@MainActivity, song.uri)
-                setOnPreparedListener { it.start(); toast("در حال پخش: ${song.title}") }
-                setOnErrorListener { _, _, _ -> toast("پخش این فایل ممکن نیست."); true }
+                setOnPreparedListener {
+                    it.start()
+                    toast("در حال پخش: ${song.title}")
+                }
+                setOnCompletionListener { playNextSong() }
+                setOnErrorListener { _, _, _ ->
+                    toast("پخش این فایل ممکن نیست.")
+                    true
+                }
                 prepareAsync()
             }
-        } catch (_: Exception) { toast("خطا در پخش آهنگ.") }
+        } catch (_: Exception) {
+            toast("خطا در پخش آهنگ.")
+        }
+    }
+
+    private fun playNextSong() {
+        if (playbackQueue.size < 2 || currentSongIndex !in playbackQueue.indices) return
+        currentSongIndex = if (shuffleEnabled) {
+            (playbackQueue.indices.filter { it != currentSongIndex }).random()
+        } else {
+            (currentSongIndex + 1) % playbackQueue.size
+        }
+        startSong(playbackQueue[currentSongIndex])
     }
 
     private fun label(text: String, size: Int, color: Int = white) = TextView(this).apply {
