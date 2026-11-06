@@ -40,7 +40,7 @@ jobs:
         id: meta
         shell: bash
         run: |
-          VERSION_NAME=$(grep -oP 'versionName\\s*=\\s*"\\K[^"]+' app/build.gradle.kts)
+          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | cut -d '"' -f 2)
           echo "release_tag=v${VERSION_NAME}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
