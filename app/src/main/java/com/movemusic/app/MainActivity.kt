@@ -7,7 +7,13 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -34,6 +40,9 @@ class MainActivity : Activity() {
     private var playbackQueue: List<Song> = emptyList()
     private var currentSongIndex = -1
     private var shuffleEnabled = false
+    private var currentSong: Song? = null
+    private var playerScreenVisible = false
+    private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
 
@@ -273,6 +282,8 @@ class MainActivity : Activity() {
             songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
+        currentSong = song
+        showPlayerScreen()
         startSong(song)
     }
 
@@ -283,7 +294,7 @@ class MainActivity : Activity() {
                 setDataSource(this@MainActivity, song.uri)
                 setOnPreparedListener {
                     it.start()
-                    toast("در حال پخش: ${song.title}")
+                    if (playerScreenVisible) updatePlayerControls()
                 }
                 setOnCompletionListener { playNextSong() }
                 setOnErrorListener { _, _, _ ->
@@ -297,14 +308,196 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun playNextSong() {
+    private fun showPlayerScreen() {
+        val song = currentSong ?: return
+        playerScreenVisible = true
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(22, 28, 22, 24)
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xFF242B22.toInt(), 0xFF505A3F.toInt(), 0xFF242B22.toInt())
+            )
+        }
+
+        val cover = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = GradientDrawable().apply {
+                setColor(0xFF20251F.toInt())
+                cornerRadius = 18f
+            }
+            clipToOutline = true
+            setImageResource(android.R.drawable.ic_media_play)
+            val size = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+            root.addView(this, LinearLayout.LayoutParams(size, size).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = 26
+            })
+        }
+
+        root.addView(TextView(this).apply {
+            text = song.title
+            textSize = 21f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            maxLines = 2
+        })
+        root.addView(TextView(this).apply {
+            text = song.artist
+            textSize = 15f
+            setTextColor(0xFFD4D8CA.toInt())
+            gravity = Gravity.CENTER
+            setPadding(0, 7, 0, 24)
+        })
+
+        val seek = SeekBar(this).apply {
+            max = 1000
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFFD9E9B0.toInt())
+            thumbTintList = android.content.res.ColorStateList.valueOf(0xFFD9E9B0.toInt())
+        }
+        root.addView(seek, LinearLayout.LayoutParams(-1, -2))
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val p = player ?: return
+                    if (p.isPlaying || p.currentPosition >= 0) {
+                        val duration = p.duration
+                        if (duration > 0) p.seekTo(duration * progress / 1000)
+                    }
+                }
+            }
+            override fun onStartTrackingTouch(bar: SeekBar?) {}
+            override fun onStopTrackingTouch(bar: SeekBar?) {}
+        })
+
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 28, 0, 0)
+        }
+        val previous = playerControl("⏮") { playPreviousSong() }
+        val playPause = playerControl("Ⅱ") { togglePlayback() }
+        val next = playerControl("⏭") { playNextSong(manual = true) }
+        controls.addView(previous)
+        controls.addView(playPause, LinearLayout.LayoutParams(92, 92).apply {
+            marginStart = 20; marginEnd = 20
+        })
+        controls.addView(next)
+        root.addView(controls)
+
+        root.addView(TextView(this).apply {
+            text = "برای بازگشت، دکمه برگشت گوشی را بزنید؛ موسیقی ادامه پیدا می‌کند."
+            textSize = 11f
+            setTextColor(0xFFD4D8CA.toInt())
+            gravity = Gravity.CENTER
+            setPadding(0, 24, 0, 0)
+        })
+
+        setContentView(root)
+        loadSongArtwork(song, cover)
+        updatePlayerControls(playPause)
+        updateSeekBar(seek)
+    }
+
+    private fun loadSongArtwork(song: Song, target: ImageView) {
+        Thread {
+            var bitmap: android.graphics.Bitmap? = null
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(this, song.uri)
+                val bytes = retriever.embeddedPicture
+                if (bytes != null) bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                retriever.release()
+            } catch (_: Exception) {}
+            runOnUiThread {
+                if (playerScreenVisible && currentSong?.id == song.id && bitmap != null) {
+                    target.setImageBitmap(bitmap)
+                } else if (bitmap == null && playerScreenVisible && currentSong?.id == song.id) {
+                    target.setImageResource(android.R.drawable.ic_media_play)
+                    target.scaleType = ImageView.ScaleType.CENTER
+                }
+            }
+        }.start()
+    }
+
+    private fun playerControl(symbol: String, action: () -> Unit): TextView =
+        TextView(this).apply {
+            text = symbol
+            textSize = 30f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF009D98.toInt())
+            }
+            layoutParams = LinearLayout.LayoutParams(72, 72).apply {
+                marginStart = 5; marginEnd = 5
+            }
+            setOnClickListener { action() }
+        }
+
+    private fun updatePlayerControls(view: TextView? = null) {
+        val control = view ?: return
+        control.text = if (player?.isPlaying == true) "Ⅱ" else "▶"
+    }
+
+    private fun togglePlayback() {
+        val p = player ?: return
+        try {
+            if (p.isPlaying) p.pause() else p.start()
+            val root = window.decorView
+            // Rebuild only the control label through the current player screen.
+            if (playerScreenVisible) showPlayerScreen()
+        } catch (_: Exception) {}
+    }
+
+    private fun updateSeekBar(seek: SeekBar) {
+        val task = object : Runnable {
+            override fun run() {
+                if (!playerScreenVisible) return
+                try {
+                    val p = player
+                    if (p != null && p.duration > 0) {
+                        seek.progress = (p.currentPosition * 1000L / p.duration).toInt()
+                    }
+                } catch (_: Exception) {}
+                uiHandler.postDelayed(this, 500)
+            }
+        }
+        uiHandler.post(task)
+    }
+
+    private fun playPreviousSong() {
+        if (playbackQueue.isEmpty() || currentSongIndex !in playbackQueue.indices) return
+        currentSongIndex = if (currentSongIndex <= 0) playbackQueue.lastIndex else currentSongIndex - 1
+        currentSong = playbackQueue[currentSongIndex]
+        if (playerScreenVisible) showPlayerScreen()
+        startSong(playbackQueue[currentSongIndex])
+    }
+
+    private fun playNextSong(manual: Boolean = false) {
         if (playbackQueue.size < 2 || currentSongIndex !in playbackQueue.indices) return
         currentSongIndex = if (shuffleEnabled) {
             (playbackQueue.indices.filter { it != currentSongIndex }).random()
         } else {
             (currentSongIndex + 1) % playbackQueue.size
         }
+        currentSong = playbackQueue[currentSongIndex]
+        if (playerScreenVisible) showPlayerScreen()
         startSong(playbackQueue[currentSongIndex])
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (playerScreenVisible) {
+            playerScreenVisible = false
+            uiHandler.removeCallbacksAndMessages(null)
+            render()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     private fun label(text: String, size: Int, color: Int = white) = TextView(this).apply {
@@ -332,5 +525,5 @@ class MainActivity : Activity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-    override fun onDestroy() { player?.release(); super.onDestroy() }
+    override fun onDestroy() { uiHandler.removeCallbacksAndMessages(null); player?.release(); super.onDestroy() }
 }
