@@ -133,11 +133,11 @@ class MainActivity : Activity() {
     private fun render() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(bg)
-            setPadding(18, 24, 18, 12)
+            setPadding(12, 12, 12, 8)
         }
-        header = label("MOVEMUSIC  ✦", 24, blue)
+        header = label("MOVEMUSIC  ✦", 22, blue)
         root.addView(header)
-        root.addView(label("موسیقی آفلاین، مدیریت ساده", 13, muted))
+        root.addView(label("موسیقی آفلاین، مدیریت ساده", 12, muted))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         nav.addView(button("همه آهنگ‌ها") { currentPlaylist = "همه آهنگ‌ها"; displayedSongCount = 50; refreshBody() })
         nav.addView(button("پلی‌لیست‌ها") { showPlaylistChooser() })
@@ -146,38 +146,63 @@ class MainActivity : Activity() {
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(body) }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(label("برای انتقال، آهنگ را انتخاب کن و «انتقال به…» را بزن.", 12, muted))
+        root.addView(label("برای انتقال، آهنگ را انتخاب کن و «انتقال به…» را بزن.", 10, muted))
         setContentView(root)
         refreshBody()
     }
 
     private fun refreshBody() {
         body.removeAllViews()
-        body.addView(label(currentPlaylist, 20, white))
+        body.addView(label(currentPlaylist, 18, white))
         val visible = if (currentPlaylist == "همه آهنگ‌ها") songs
             else songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
-        if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 14, muted))
+        if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
         val page = visible.take(displayedSongCount)
         page.forEach { song ->
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; setPadding(12, 10, 12, 10)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(10, 5, 6, 5)
                 setBackgroundColor(panel)
             }
-            card.addView(label(song.title, 16, white))
-            card.addView(label(song.artist, 12, muted))
-            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            actions.addView(button("▶ پخش") { play(song) })
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            details.addView(TextView(this).apply {
+                text = song.title
+                textSize = 14f
+                setTextColor(white)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            details.addView(TextView(this).apply {
+                text = song.artist
+                textSize = 11f
+                setTextColor(muted)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            actions.addView(button("▶") { play(song) })
             if (currentPlaylist != "همه آهنگ‌ها") {
-                actions.addView(button("انتقال به…") { moveSong(song) })
-                actions.addView(button("حذف از لیست") {
-                    playlists[currentPlaylist]?.remove(song.id); savePlaylists(); refreshBody()
+                actions.addView(button("انتقال") { moveSong(song) })
+                actions.addView(button("حذف") {
+                    playlists[currentPlaylist]?.remove(song.id)
+                    savePlaylists()
+                    refreshBody()
                 })
             } else {
-                actions.addView(button("افزودن به…") { addSong(song) })
+                actions.addView(button("+ لیست") { addSong(song) })
             }
-            card.addView(actions)
-            val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 8
-            body.addView(card, lp)
+            row.addView(actions)
+            val lp = LinearLayout.LayoutParams(-1, -2)
+            lp.bottomMargin = 3
+            body.addView(row, lp)
         }
         if (visible.size > page.size) {
             body.addView(button("نمایش ۵۰ آهنگ بعدی") {
@@ -248,9 +273,22 @@ class MainActivity : Activity() {
         setPadding(4, 8, 4, 8)
     }
 
-    private fun button(text: String, action: () -> Unit) = Button(this).apply {
-        this.text = text; textSize = 12f; setTextColor(white)
-        setBackgroundTintList(android.content.res.ColorStateList.valueOf(blue))
+    private fun button(text: String, action: () -> Unit) = TextView(this).apply {
+        this.text = text
+        textSize = 11f
+        setTextColor(white)
+        gravity = Gravity.CENTER
+        minHeight = 0
+        minWidth = 0
+        setPadding(9, 6, 9, 6)
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(blue)
+            cornerRadius = 7f
+        }
+        val lp = LinearLayout.LayoutParams(-2, -2)
+        lp.marginStart = 3
+        lp.marginEnd = 3
+        layoutParams = lp
         setOnClickListener { action() }
     }
 
