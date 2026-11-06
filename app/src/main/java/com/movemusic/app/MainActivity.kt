@@ -188,7 +188,6 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            actions.addView(button("▶") { play(song) })
             if (currentPlaylist != "همه آهنگ‌ها") {
                 actions.addView(button("انتقال") { moveSong(song) })
                 actions.addView(button("حذف") {
@@ -200,6 +199,9 @@ class MainActivity : Activity() {
                 actions.addView(button("+ لیست") { addSong(song) })
             }
             row.addView(actions)
+            row.isClickable = true
+            row.isFocusable = true
+            row.setOnClickListener { play(song) }
             val lp = LinearLayout.LayoutParams(-1, -2)
             lp.bottomMargin = 3
             body.addView(row, lp)
