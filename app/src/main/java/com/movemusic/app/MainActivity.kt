@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private val playlists = linkedMapOf<String, MutableList<Long>>()
     private val songs = mutableListOf<Song>()
     private var currentPlaylist = "همه آهنگ‌ها"
+    private var displayedSongCount = 50
     private var player: MediaPlayer? = null
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
@@ -45,37 +46,65 @@ class MainActivity : Activity() {
         if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(permission), 10)
         } else {
-            loadSongs()
-            render()
+            loadSongsAsync()
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode == 10 && results.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            loadSongs(); render()
+            loadSongsAsync()
         } else {
             setContentView(label("برای نمایش آهنگ‌های گوشی، مجوز دسترسی به فایل‌های صوتی لازم است.", 18))
         }
     }
 
-    private fun loadSongs() {
-        songs.clear()
-        val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.IS_MUSIC)
-        contentResolver.query(collection, projection, "${MediaStore.Audio.Media.IS_MUSIC} != 0",
-            null, "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC")?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            while (c.moveToNext()) {
-                val id = c.getLong(idCol)
-                songs.add(Song(id, c.getString(titleCol) ?: "بدون عنوان",
-                    c.getString(artistCol) ?: "هنرمند نامشخص",
-                    ContentUris.withAppendedId(collection, id)))
+    private fun loadSongsAsync() {
+        setContentView(label("در حال بارگذاری آهنگ‌ها…", 18, white))
+        Thread {
+            val loadedSongs = mutableListOf<Song>()
+            try {
+                val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.IS_MUSIC
+                )
+                contentResolver.query(
+                    collection,
+                    projection,
+                    "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+                    null,
+                    "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        loadedSongs.add(
+                            Song(
+                                id,
+                                cursor.getString(titleCol) ?: "بدون عنوان",
+                                cursor.getString(artistCol) ?: "هنرمند نامشخص",
+                                ContentUris.withAppendedId(collection, id)
+                            )
+                        )
+                    }
+                }
+                runOnUiThread {
+                    songs.clear()
+                    songs.addAll(loadedSongs)
+                    displayedSongCount = 50
+                    render()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    setContentView(label("خواندن آهنگ‌ها با خطا مواجه شد. مجوز دسترسی به موسیقی را بررسی کن و برنامه را دوباره باز کن.", 16))
+                }
             }
-        }
+        }.start()
     }
 
     private fun loadPlaylists() {
@@ -110,7 +139,7 @@ class MainActivity : Activity() {
         root.addView(header)
         root.addView(label("موسیقی آفلاین، مدیریت ساده", 13, muted))
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        nav.addView(button("همه آهنگ‌ها") { currentPlaylist = "همه آهنگ‌ها"; refreshBody() })
+        nav.addView(button("همه آهنگ‌ها") { currentPlaylist = "همه آهنگ‌ها"; displayedSongCount = 50; refreshBody() })
         nav.addView(button("پلی‌لیست‌ها") { showPlaylistChooser() })
         nav.addView(button("+ جدید") { createPlaylist() })
         root.addView(nav)
@@ -128,7 +157,8 @@ class MainActivity : Activity() {
         val visible = if (currentPlaylist == "همه آهنگ‌ها") songs
             else songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
         if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 14, muted))
-        visible.forEach { song ->
+        val page = visible.take(displayedSongCount)
+        page.forEach { song ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; setPadding(12, 10, 12, 10)
                 setBackgroundColor(panel)
@@ -148,6 +178,12 @@ class MainActivity : Activity() {
             card.addView(actions)
             val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 8
             body.addView(card, lp)
+        }
+        if (visible.size > page.size) {
+            body.addView(button("نمایش ۵۰ آهنگ بعدی") {
+                displayedSongCount += 50
+                refreshBody()
+            })
         }
     }
 
@@ -179,7 +215,7 @@ class MainActivity : Activity() {
         val names = playlists.keys.toMutableList()
         names.add(0, "همه آهنگ‌ها")
         AlertDialog.Builder(this).setTitle("انتخاب پلی‌لیست").setItems(names.toTypedArray()) { _, i ->
-            currentPlaylist = names[i]; refreshBody()
+            currentPlaylist = names[i]; displayedSongCount = 50; refreshBody()
         }.show()
     }
 
@@ -190,7 +226,7 @@ class MainActivity : Activity() {
                 val name = input.text.toString().trim()
                 if (name.isNotEmpty() && name != "همه آهنگ‌ها" && !playlists.containsKey(name)) {
                     playlists[name] = mutableListOf(); savePlaylists()
-                    currentPlaylist = name; refreshBody()
+                    currentPlaylist = name; displayedSongCount = 50; refreshBody()
                 } else toast("این نام قابل استفاده نیست.")
             }.show()
     }
