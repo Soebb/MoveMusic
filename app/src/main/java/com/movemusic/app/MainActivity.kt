@@ -43,6 +43,8 @@ class MainActivity : Activity() {
     private var currentSong: Song? = null
     private var playerScreenVisible = false
     private val uiHandler = Handler(Looper.getMainLooper())
+    private var playPauseButton: ImageButton? = null
+    private var seekBarTask: Runnable? = null
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
 
@@ -289,22 +291,37 @@ class MainActivity : Activity() {
 
     private fun startSong(song: Song) {
         try {
+            // Detach callbacks before releasing the previous player so a late
+            // error from the old track cannot show a misleading message.
+            player?.setOnPreparedListener(null)
+            player?.setOnCompletionListener(null)
+            player?.setOnErrorListener(null)
             player?.release()
-            player = MediaPlayer().apply {
-                setDataSource(this@MainActivity, song.uri)
-                setOnPreparedListener {
-                    it.start()
-                    if (playerScreenVisible) updatePlayerControls()
+
+            val newPlayer = MediaPlayer()
+            player = newPlayer
+            newPlayer.setOnPreparedListener { mp ->
+                if (player !== mp) return@setOnPreparedListener
+                try {
+                    mp.start()
+                    updatePlayerControls()
+                } catch (_: Exception) {
+                    if (player === mp) toast("پخش این فایل ممکن نیست.")
                 }
-                setOnCompletionListener { playNextSong() }
-                setOnErrorListener { _, _, _ ->
-                    toast("پخش این فایل ممکن نیست.")
-                    true
-                }
-                prepareAsync()
             }
+            newPlayer.setOnCompletionListener { mp ->
+                if (player === mp) playNextSong()
+            }
+            newPlayer.setOnErrorListener { mp, _, _ ->
+                if (player === mp && currentSong?.id == song.id) {
+                    toast("پخش این فایل ممکن نیست.")
+                }
+                true
+            }
+            newPlayer.setDataSource(this, song.uri)
+            newPlayer.prepareAsync()
         } catch (_: Exception) {
-            toast("خطا در پخش آهنگ.")
+            toast("باز کردن فایل موسیقی ممکن نشد.")
         }
     }
 
@@ -375,16 +392,19 @@ class MainActivity : Activity() {
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, 28, 0, 0)
+            setPadding(0, 24, 0, 0)
         }
-        val previous = playerControl("⏮") { playPreviousSong() }
-        val playPause = playerControl("Ⅱ") { togglePlayback() }
-        val next = playerControl("⏭") { playNextSong(manual = true) }
-        controls.addView(previous)
-        controls.addView(playPause, LinearLayout.LayoutParams(92, 92).apply {
-            marginStart = 20; marginEnd = 20
-        })
-        controls.addView(next)
+        controls.addView(playerControl(android.R.drawable.ic_media_previous, 64) { playPreviousSong() })
+        playPauseButton = playerControl(
+            if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            76
+        ) { togglePlayback() }.also {
+            val lp = LinearLayout.LayoutParams(76, 76).apply {
+                marginStart = 18; marginEnd = 18
+            }
+            controls.addView(it, lp)
+        }
+        controls.addView(playerControl(android.R.drawable.ic_media_next, 64) { playNextSong() })
         root.addView(controls)
 
         root.addView(TextView(this).apply {
@@ -397,7 +417,7 @@ class MainActivity : Activity() {
 
         setContentView(root)
         loadSongArtwork(song, cover)
-        updatePlayerControls(playPause)
+        updatePlayerControls()
         updateSeekBar(seek)
     }
 
@@ -422,50 +442,55 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun playerControl(symbol: String, action: () -> Unit): TextView =
-        TextView(this).apply {
-            text = symbol
-            textSize = 30f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
+    private fun playerControl(iconRes: Int, size: Int, action: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(iconRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(size / 4, size / 4, size / 4, size / 4)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(0xFF009D98.toInt())
             }
-            layoutParams = LinearLayout.LayoutParams(72, 72).apply {
-                marginStart = 5; marginEnd = 5
+            contentDescription = when (iconRes) {
+                android.R.drawable.ic_media_previous -> "آهنگ قبلی"
+                android.R.drawable.ic_media_next -> "آهنگ بعدی"
+                android.R.drawable.ic_media_pause -> "توقف موقت"
+                else -> "پخش"
             }
             setOnClickListener { action() }
         }
 
-    private fun updatePlayerControls(view: TextView? = null) {
-        val control = view ?: return
-        control.text = if (player?.isPlaying == true) "Ⅱ" else "▶"
+    private fun updatePlayerControls() {
+        playPauseButton?.setImageResource(
+            if (player?.isPlaying == true) android.R.drawable.ic_media_pause
+            else android.R.drawable.ic_media_play
+        )
     }
 
     private fun togglePlayback() {
         val p = player ?: return
         try {
             if (p.isPlaying) p.pause() else p.start()
-            val root = window.decorView
-            // Rebuild only the control label through the current player screen.
-            if (playerScreenVisible) showPlayerScreen()
+            updatePlayerControls()
         } catch (_: Exception) {}
     }
 
     private fun updateSeekBar(seek: SeekBar) {
+        seekBarTask?.let { uiHandler.removeCallbacks(it) }
         val task = object : Runnable {
             override fun run() {
                 if (!playerScreenVisible) return
                 try {
                     val p = player
-                    if (p != null && p.duration > 0) {
+                    if (p != null && p.isPlaying && p.duration > 0) {
                         seek.progress = (p.currentPosition * 1000L / p.duration).toInt()
                     }
                 } catch (_: Exception) {}
                 uiHandler.postDelayed(this, 500)
             }
         }
+        seekBarTask = task
         uiHandler.post(task)
     }
 
@@ -493,7 +518,9 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (playerScreenVisible) {
             playerScreenVisible = false
-            uiHandler.removeCallbacksAndMessages(null)
+            seekBarTask?.let { uiHandler.removeCallbacks(it) }
+            seekBarTask = null
+            playPauseButton = null
             render()
         } else {
             super.onBackPressed()
@@ -525,5 +552,5 @@ class MainActivity : Activity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-    override fun onDestroy() { uiHandler.removeCallbacksAndMessages(null); player?.release(); super.onDestroy() }
+    override fun onDestroy() { uiHandler.removeCallbacksAndMessages(null); player?.release(); player = null; super.onDestroy() }
 }
