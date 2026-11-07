@@ -174,6 +174,18 @@ class MainActivity : Activity() {
         body.addView(label(currentPlaylist, 18, white))
         val visible = if (currentPlaylist == "همه آهنگ‌ها") songs
             else songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
+        if (currentPlaylist != "همه آهنگ‌ها") {
+            body.addView(button("افزودن همه آهنگ‌ها به این پلی‌لیست") {
+                val target = playlists[currentPlaylist] ?: return@button
+                val existingIds = target.toHashSet()
+                val newSongs = songs.filter { existingIds.add(it.id) }
+                target.addAll(newSongs.map { it.id })
+                savePlaylists()
+                refreshBody()
+                toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
+                      else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
+            })
+        }
         if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
         body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
             shuffleEnabled = !shuffleEnabled
