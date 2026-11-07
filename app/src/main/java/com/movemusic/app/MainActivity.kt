@@ -160,6 +160,9 @@ class MainActivity : Activity() {
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(body) }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (currentSong != null) {
+            root.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+        }
         root.addView(label("برای انتقال، آهنگ را انتخاب کن و «انتقال به…» را بزن.", 10, muted))
         setContentView(root)
         refreshBody()
@@ -396,17 +399,17 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, 24, 0, 0)
         }
-        controls.addView(playerControl(android.R.drawable.ic_media_previous, 64) { playPreviousSong() })
+        controls.addView(playerControl(android.R.drawable.ic_media_previous, 90) { playPreviousSong() })
         playPauseButton = playerControl(
             if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            84
+            120
         ) { togglePlayback() }.also {
-            val lp = LinearLayout.LayoutParams(84, 84).apply {
+            val lp = LinearLayout.LayoutParams(120, 120).apply {
                 marginStart = 18; marginEnd = 18
             }
             controls.addView(it, lp)
         }
-        controls.addView(playerControl(android.R.drawable.ic_media_next, 64) { playNextSong() })
+        controls.addView(playerControl(android.R.drawable.ic_media_next, 90) { playNextSong() })
         root.addView(controls)
 
         root.addView(TextView(this).apply {
@@ -422,6 +425,79 @@ class MainActivity : Activity() {
         updatePlayerControls()
         updateSeekBar(seek)
     }
+
+    private fun buildMiniPlayerBar(): View {
+        val song = currentSong!!
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            setPadding(10, 8, 10, 8)
+            background = GradientDrawable().apply {
+                setColor(0xFF18212D.toInt())
+                cornerRadius = 12f
+            }
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showPlayerScreen() }
+        }
+
+        val details = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        details.addView(TextView(this).apply {
+            text = song.title
+            textSize = 13f
+            setTextColor(white)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        details.addView(TextView(this).apply {
+            text = song.artist
+            textSize = 11f
+            setTextColor(muted)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        bar.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+
+        val miniControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+        }
+        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_previous, "آهنگ قبلی") {
+            playPreviousSong()
+        })
+        miniControls.addView(miniPlayerButton(
+            if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            "پخش یا توقف"
+        ) { togglePlayback() })
+        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_next, "آهنگ بعدی") {
+            playNextSong()
+        })
+        bar.addView(miniControls)
+        return bar
+    }
+
+    private fun miniPlayerButton(iconRes: Int, description: String, action: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(iconRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(7, 7, 7, 7)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF009D98.toInt())
+            }
+            contentDescription = description
+            layoutParams = LinearLayout.LayoutParams(38, 38).apply {
+                marginStart = 3
+                marginEnd = 3
+            }
+            setOnClickListener { action() }
+        }
 
     private fun loadSongArtwork(song: Song, target: ImageView) {
         Thread {
@@ -501,7 +577,7 @@ class MainActivity : Activity() {
         if (playbackQueue.isEmpty() || currentSongIndex !in playbackQueue.indices) return
         currentSongIndex = if (currentSongIndex <= 0) playbackQueue.lastIndex else currentSongIndex - 1
         currentSong = playbackQueue[currentSongIndex]
-        if (playerScreenVisible) showPlayerScreen()
+        if (playerScreenVisible) showPlayerScreen() else render()
         startSong(playbackQueue[currentSongIndex])
     }
 
@@ -513,7 +589,7 @@ class MainActivity : Activity() {
             (currentSongIndex + 1) % playbackQueue.size
         }
         currentSong = playbackQueue[currentSongIndex]
-        if (playerScreenVisible) showPlayerScreen()
+        if (playerScreenVisible) showPlayerScreen() else render()
         startSong(playbackQueue[currentSongIndex])
     }
 
