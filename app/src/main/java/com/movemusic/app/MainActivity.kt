@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private var playerScreenVisible = false
     private val uiHandler = Handler(Looper.getMainLooper())
     private var playPauseButton: ImageButton? = null
+    private var miniPlayPauseButton: ImageButton? = null
     private var seekBarTask: Runnable? = null
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
@@ -433,7 +434,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
             setPadding(14, 16, 14, 16)
-            minimumHeight = 112
+            minimumHeight = 200
             background = GradientDrawable().apply {
                 setColor(blue)
                 cornerRadius = 14f
@@ -471,11 +472,12 @@ class MainActivity : Activity() {
         miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_previous, "آهنگ قبلی", 90) {
             playPreviousSong()
         })
-        miniControls.addView(miniPlayerButton(
+        miniPlayPauseButton = miniPlayerButton(
             if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
             "پخش یا توقف",
             120
-        ) { togglePlayback() })
+        ) { togglePlayback() }
+        miniControls.addView(miniPlayPauseButton)
         miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_next, "آهنگ بعدی", 90) {
             playNextSong()
         })
@@ -543,10 +545,10 @@ class MainActivity : Activity() {
         }
 
     private fun updatePlayerControls() {
-        playPauseButton?.setImageResource(
-            if (player?.isPlaying == true) android.R.drawable.ic_media_pause
-            else android.R.drawable.ic_media_play
-        )
+        val icon = if (player?.isPlaying == true) android.R.drawable.ic_media_pause
+                   else android.R.drawable.ic_media_play
+        playPauseButton?.setImageResource(icon)
+        miniPlayPauseButton?.setImageResource(icon)
     }
 
     private fun togglePlayback() {
@@ -602,6 +604,7 @@ class MainActivity : Activity() {
             seekBarTask?.let { uiHandler.removeCallbacks(it) }
             seekBarTask = null
             playPauseButton = null
+            miniPlayPauseButton = null
             render()
         } else {
             super.onBackPressed()
