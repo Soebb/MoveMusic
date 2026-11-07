@@ -310,7 +310,9 @@ class MainActivity : Activity() {
                 }
             }
             newPlayer.setOnCompletionListener { mp ->
-                if (player === mp) playNextSong()
+                // Auto-advance only in shuffle mode. In normal mode, leave
+                // playback stopped at the end of the current track.
+                if (player === mp && shuffleEnabled) playNextSong()
             }
             newPlayer.setOnErrorListener { mp, _, _ ->
                 if (player === mp && currentSong?.id == song.id) {
@@ -397,9 +399,9 @@ class MainActivity : Activity() {
         controls.addView(playerControl(android.R.drawable.ic_media_previous, 64) { playPreviousSong() })
         playPauseButton = playerControl(
             if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            76
+            84
         ) { togglePlayback() }.also {
-            val lp = LinearLayout.LayoutParams(76, 76).apply {
+            val lp = LinearLayout.LayoutParams(84, 84).apply {
                 marginStart = 18; marginEnd = 18
             }
             controls.addView(it, lp)
@@ -447,7 +449,8 @@ class MainActivity : Activity() {
             setImageResource(iconRes)
             imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(size / 4, size / 4, size / 4, size / 4)
+            setPadding(size / 6, size / 6, size / 6, size / 6)
+            layoutParams = LinearLayout.LayoutParams(size, size)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(0xFF009D98.toInt())
