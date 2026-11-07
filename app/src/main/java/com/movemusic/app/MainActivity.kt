@@ -172,8 +172,17 @@ class MainActivity : Activity() {
     private fun refreshBody() {
         body.removeAllViews()
         body.addView(label(currentPlaylist, 18, white))
-        val visible = if (currentPlaylist == "همه آهنگ‌ها") songs
-            else songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
+        // Only collect the current page (plus one item to detect whether
+        // another page exists). Avoid filtering the entire music library on
+        // every return from the player screen.
+        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+        val pageWithExtra = songs.asSequence()
+            .filter { playlistIds == null || it.id in playlistIds }
+            .take(displayedSongCount + 1)
+            .toList()
+        val hasMoreSongs = pageWithExtra.size > displayedSongCount
+        val page = pageWithExtra.take(displayedSongCount)
         if (currentPlaylist != "همه آهنگ‌ها") {
             body.addView(button("افزودن همه آهنگ‌ها به این پلی‌لیست") {
                 val target = playlists[currentPlaylist] ?: return@button
@@ -186,13 +195,12 @@ class MainActivity : Activity() {
                       else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
             })
         }
-        if (visible.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
+        if (page.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
         body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
             shuffleEnabled = !shuffleEnabled
             refreshBody()
             toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
         })
-        val page = visible.take(displayedSongCount)
         page.forEach { song ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -241,7 +249,7 @@ class MainActivity : Activity() {
             lp.bottomMargin = 3
             body.addView(row, lp)
         }
-        if (visible.size > page.size) {
+        if (hasMoreSongs) {
             body.addView(button("نمایش ۵۰ آهنگ بعدی") {
                 displayedSongCount += 50
                 refreshBody()
