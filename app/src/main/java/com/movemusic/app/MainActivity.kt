@@ -432,10 +432,11 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
-            setPadding(10, 8, 10, 8)
+            setPadding(14, 16, 14, 16)
+            minimumHeight = 112
             background = GradientDrawable().apply {
-                setColor(0xFF18212D.toInt())
-                cornerRadius = 12f
+                setColor(blue)
+                cornerRadius = 14f
             }
             isClickable = true
             isFocusable = true
@@ -467,34 +468,35 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_LTR
         }
-        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_previous, "آهنگ قبلی") {
+        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_previous, "آهنگ قبلی", 90) {
             playPreviousSong()
         })
         miniControls.addView(miniPlayerButton(
             if (player?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            "پخش یا توقف"
+            "پخش یا توقف",
+            120
         ) { togglePlayback() })
-        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_next, "آهنگ بعدی") {
+        miniControls.addView(miniPlayerButton(android.R.drawable.ic_media_next, "آهنگ بعدی", 90) {
             playNextSong()
         })
         bar.addView(miniControls)
         return bar
     }
 
-    private fun miniPlayerButton(iconRes: Int, description: String, action: () -> Unit): ImageButton =
+    private fun miniPlayerButton(iconRes: Int, description: String, size: Int, action: () -> Unit): ImageButton =
         ImageButton(this).apply {
             setImageResource(iconRes)
             imageTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(7, 7, 7, 7)
+            setPadding(size / 6, size / 6, size / 6, size / 6)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(0xFF009D98.toInt())
             }
             contentDescription = description
-            layoutParams = LinearLayout.LayoutParams(38, 38).apply {
-                marginStart = 3
-                marginEnd = 3
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                marginStart = 5
+                marginEnd = 5
             }
             setOnClickListener { action() }
         }
