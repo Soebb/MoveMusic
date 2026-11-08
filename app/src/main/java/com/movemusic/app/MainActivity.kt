@@ -10,6 +10,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaMetadataRetriever
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.util.LruCache
+import java.util.concurrent.Executors
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -63,6 +66,11 @@ class MainActivity : Activity() {
     private var songScrollView: ScrollView? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
+    private val artworkExecutor = Executors.newFixedThreadPool(2)
+    private val artworkCache = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()) {
+        override fun sizeOf(key: Long, value: Bitmap): Int = value.byteCount / 1024
+    }
+    private var artworkRequestToken = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -668,26 +676,41 @@ class MainActivity : Activity() {
         }
 
     private fun loadSongArtwork(song: Song, target: ImageView) {
-        Thread {
-            var bitmap: android.graphics.Bitmap? = null
+        val requestToken = ++artworkRequestToken
+        artworkCache.get(song.id)?.let { cached ->
+            target.setImageBitmap(cached)
+            target.scaleType = ImageView.ScaleType.CENTER_CROP
+            return
+        }
+        artworkExecutor.execute {
+            var bitmap: Bitmap? = null
+            var retriever: MediaMetadataRetriever? = null
             try {
-                val retriever = MediaMetadataRetriever()
+                retriever = MediaMetadataRetriever()
                 retriever.setDataSource(this, song.uri)
                 val bytes = retriever.embeddedPicture
-                if (bytes != null) bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                retriever.release()
-            } catch (_: Exception) {}
+                if (bytes != null) {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    val targetSize = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+                    var sample = 1
+                    while (bounds.outWidth / (sample * 2) >= targetSize && bounds.outHeight / (sample * 2) >= targetSize) sample *= 2
+                    bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                    bitmap?.let { artworkCache.put(song.id, it) }
+                }
+            } catch (_: Exception) {
+            } finally {
+                try { retriever?.release() } catch (_: Exception) {}
+            }
+            val result = bitmap
             runOnUiThread {
-                if (playerScreenVisible && currentSong?.id == song.id && bitmap != null) {
-                    target.setImageBitmap(bitmap)
-                } else if (bitmap == null && playerScreenVisible && currentSong?.id == song.id) {
-                    target.setImageResource(android.R.drawable.ic_media_play)
-                    target.scaleType = ImageView.ScaleType.CENTER
+                if (!isFinishing && playerScreenVisible && artworkRequestToken == requestToken && currentSong?.id == song.id) {
+                    if (result != null) { target.setImageBitmap(result); target.scaleType = ImageView.ScaleType.CENTER_CROP }
+                    else { target.setImageResource(android.R.drawable.ic_media_play); target.scaleType = ImageView.ScaleType.CENTER }
                 }
             }
-        }.start()
+        }
     }
-
     private fun playerControl(iconRes: Int, size: Int, action: () -> Unit): ImageButton =
         ImageButton(this).apply {
             setImageResource(iconRes)
@@ -783,6 +806,7 @@ class MainActivity : Activity() {
             miniPlayPauseButton = null
             // Restore the existing home view instead of rebuilding every song row.
             // This preserves the exact scroll position and avoids a long UI-thread pass.
+            homeRoot?.let { setContentView(it) } ?: render()
             miniPlayerHost?.let { host ->
                 host.removeAllViews()
                 if (currentSong != null) {
@@ -792,7 +816,6 @@ class MainActivity : Activity() {
                     host.visibility = View.GONE
                 }
             }
-            homeRoot?.let { setContentView(it) } ?: render()
         } else {
             super.onBackPressed()
         }
@@ -825,6 +848,8 @@ class MainActivity : Activity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        artworkExecutor.shutdownNow()
+        artworkCache.evictAll()
         pendingSong = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         player = null
