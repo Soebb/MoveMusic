@@ -48,6 +48,8 @@ class MainActivity : Activity() {
     private var seekBarTask: Runnable? = null
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
+    private var homeRoot: View? = null
+    private var miniPlayerHost: LinearLayout? = null
     private var songScrollView: ScrollView? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
@@ -175,10 +177,13 @@ class MainActivity : Activity() {
                 loadNextSongsPage()
             }
         }
-        if (currentSong != null) {
-            root.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
-        }
+        val miniHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        if (currentSong != null) miniHost.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+        else miniHost.visibility = View.GONE
+        root.addView(miniHost, LinearLayout.LayoutParams(-1, -2))
+        miniPlayerHost = miniHost
         root.addView(label("برای انتقال، آهنگ را انتخاب کن و «انتقال به…» را بزن.", 10, muted))
+        homeRoot = root
         setContentView(root)
         refreshBody()
     }
@@ -669,7 +674,18 @@ class MainActivity : Activity() {
             seekBarTask = null
             playPauseButton = null
             miniPlayPauseButton = null
-            render()
+            // Restore the existing home view instead of rebuilding every song row.
+            // This preserves the exact scroll position and avoids a long UI-thread pass.
+            miniPlayerHost?.let { host ->
+                host.removeAllViews()
+                if (currentSong != null) {
+                    host.visibility = View.VISIBLE
+                    host.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+                } else {
+                    host.visibility = View.GONE
+                }
+            }
+            homeRoot?.let { setContentView(it) } ?: render()
         } else {
             super.onBackPressed()
         }
