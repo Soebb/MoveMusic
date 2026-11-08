@@ -438,34 +438,56 @@ class MainActivity : Activity() {
             pendingSong = song
             return
         }
+
         val requestToken = ++playbackRequestToken
-        val queueSnapshot = playbackQueue.toList()
+        val queueSnapshot = playbackQueue
         val selectedIndex = queueSnapshot.indexOfFirst { it.id == song.id }
             .takeIf { it >= 0 } ?: 0
 
-        // Build potentially large playlists away from the UI thread. This
-        // prevents a long library from delaying the user's play request.
+        fun mediaItem(queuedSong: Song): MediaItem {
+            val metadata = MediaMetadata.Builder()
+                .setTitle(queuedSong.title)
+                .setArtist(queuedSong.artist)
+                .build()
+            return MediaItem.Builder()
+                .setMediaId(queuedSong.id.toString())
+                .setUri(queuedSong.uri)
+                .setMediaMetadata(metadata)
+                .build()
+        }
+
+        // Start the selected local file immediately. Never wait for the
+        // potentially large playlist to be converted into Media3 items.
+        try {
+            controller.setMediaItem(mediaItem(song))
+            controller.prepare()
+            controller.play()
+            updatePlayerControls()
+        } catch (_: Exception) {
+            toast("باز کردن فایل موسیقی ممکن نشد.")
+            return
+        }
+
+        // Populate the rest of the queue in the background while the selected
+        // track is already playing. Inserting before/after the current item
+        // preserves the active playback position.
+        if (queueSnapshot.size <= 1) return
         Thread {
-            val items = queueSnapshot.map { queuedSong ->
-                val metadata = MediaMetadata.Builder()
-                    .setTitle(queuedSong.title)
-                    .setArtist(queuedSong.artist)
-                    .build()
-                MediaItem.Builder()
-                    .setMediaId(queuedSong.id.toString())
-                    .setUri(queuedSong.uri)
-                    .setMediaMetadata(metadata)
-                    .build()
-            }
+            val previousItems = queueSnapshot.subList(0, selectedIndex).map(::mediaItem)
+            val nextItems = queueSnapshot.subList(selectedIndex + 1, queueSnapshot.size).map(::mediaItem)
             runOnUiThread {
-                if (requestToken != playbackRequestToken || player !== controller) return@runOnUiThread
+                if (requestToken != playbackRequestToken || player !== controller ||
+                    controller.currentMediaItem?.mediaId != song.id.toString()) return@runOnUiThread
                 try {
-                    controller.setMediaItems(items, selectedIndex, 0L)
-                    controller.prepare()
-                    controller.play()
-                    updatePlayerControls()
+                    if (previousItems.isNotEmpty()) {
+                        controller.addMediaItems(0, previousItems)
+                    }
+                    if (nextItems.isNotEmpty()) {
+                        controller.addMediaItems(controller.currentMediaItemIndex + 1, nextItems)
+                    }
                 } catch (_: Exception) {
-                    toast("باز کردن فایل موسیقی ممکن نشد.")
+                    // The current track is already playing; queue enrichment
+                    // must never interrupt it.
                 }
             }
         }.start()
