@@ -261,7 +261,7 @@ class MainActivity : Activity() {
         searchField = EditText(this).apply {
             hint = "نام آهنگ یا خواننده…"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             setTextColor(white)
             setHintTextColor(muted)
             setCompoundDrawablePadding(8)
