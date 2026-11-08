@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private var player: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var pendingSong: Song? = null
+    private var playbackRequestToken = 0
     private var playbackQueue: List<Song> = emptyList()
     private var currentSongIndex = -1
     private var shuffleEnabled = false
@@ -65,6 +66,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadPlaylists()
+        startService(Intent(this, PlaybackService::class.java))
         connectPlaybackController()
         showPermissionOrLoad()
     }
@@ -435,8 +437,15 @@ class MainActivity : Activity() {
             pendingSong = song
             return
         }
-        try {
-            val items = playbackQueue.map { queuedSong ->
+        val requestToken = ++playbackRequestToken
+        val queueSnapshot = playbackQueue.toList()
+        val selectedIndex = queueSnapshot.indexOfFirst { it.id == song.id }
+            .takeIf { it >= 0 } ?: 0
+
+        // Build potentially large playlists away from the UI thread. This
+        // prevents a long library from delaying the user's play request.
+        Thread {
+            val items = queueSnapshot.map { queuedSong ->
                 val metadata = MediaMetadata.Builder()
                     .setTitle(queuedSong.title)
                     .setArtist(queuedSong.artist)
@@ -447,15 +456,18 @@ class MainActivity : Activity() {
                     .setMediaMetadata(metadata)
                     .build()
             }
-            val selectedIndex = playbackQueue.indexOfFirst { it.id == song.id }
-                .takeIf { it >= 0 } ?: 0
-            controller.setMediaItems(items, selectedIndex, 0L)
-            controller.prepare()
-            controller.play()
-            updatePlayerControls()
-        } catch (_: Exception) {
-            toast("باز کردن فایل موسیقی ممکن نشد.")
-        }
+            runOnUiThread {
+                if (requestToken != playbackRequestToken || player !== controller) return@runOnUiThread
+                try {
+                    controller.setMediaItems(items, selectedIndex, 0L)
+                    controller.prepare()
+                    controller.play()
+                    updatePlayerControls()
+                } catch (_: Exception) {
+                    toast("باز کردن فایل موسیقی ممکن نشد.")
+                }
+            }
+        }.start()
     }
 
     private fun showPlayerScreen() {
