@@ -402,21 +402,27 @@ class MainActivity : Activity() {
 
         private fun totalSongCount(): Int = visibleSongsCache.size
 
+        private fun estimatedRowHeight(): Float {
+            val loaded = displayedSongCount.coerceAtLeast(1)
+            val contentHeight = scrollView.getChildAt(0)?.height ?: 0
+            return (contentHeight.toFloat() / loaded).coerceAtLeast(1f)
+        }
+
+        private fun estimatedContentHeight(): Float {
+            return (totalSongCount() * estimatedRowHeight()).coerceAtLeast(height.toFloat())
+        }
+
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
-            val range = scrollRange()
-            if (range <= 0) return height.toFloat()
-            // Derive thumb size from the real ScrollView range, not a guessed row height.
-            return (height.toFloat() * height / (height + range))
+            return (height.toFloat() * height / estimatedContentHeight())
                 .coerceAtLeast(minimumThumb)
                 .coerceAtMost(height.toFloat())
         }
 
         private fun thumbTop(): Float {
             val available = (height - thumbHeight()).coerceAtLeast(0f)
-            val range = scrollRange()
-            if (range <= 0) return 0f
-            return available * (scrollView.scrollY.toFloat() / range).coerceIn(0f, 1f)
+            val estimatedRange = (estimatedContentHeight() - height).coerceAtLeast(1f)
+            return available * (scrollView.scrollY.toFloat() / estimatedRange).coerceIn(0f, 1f)
         }
 
         override fun onDraw(canvas: Canvas) {
