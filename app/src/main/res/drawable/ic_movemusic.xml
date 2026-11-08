@@ -5,13 +5,13 @@
     android:viewportHeight="512">
     <path android:fillColor="#050713" android:pathData="M0,0h512v512h-512z"/>
     <path android:fillColor="#0C1028" android:pathData="M38,38h436v436h-436z"/>
-    <path android:fillColor="#00000000" android:strokeColor="#53647A" android:strokeWidth="28" android:pathData="M118,276v-55a138,138 0,0 1,276 0v55"/>
-    <path android:fillColor="#00000000" android:strokeColor="#8797A8" android:strokeWidth="12" android:pathData="M118,276v-55a138,138 0,0 1,276 0v55"/>
-    <path android:fillColor="#64748B" android:pathData="M82,267a38,38 0,0 1,38 -38h35v160h-35a38,38 0,0 1,-38 -38z"/>
-    <path android:fillColor="#A0AAB5" android:pathData="M357,229h35a38,38 0,0 1,38 38v84a38,38 0,0 1,-38 38h-35z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#7025D8" android:strokeWidth="28" android:pathData="M118,276v-55a138,138 0,0 1,276 0v55"/>
+    <path android:fillColor="#00000000" android:strokeColor="#12BFFF" android:strokeWidth="12" android:pathData="M118,276v-55a138,138 0,0 1,276 0v55"/>
+    <path android:fillColor="#D52BFF" android:pathData="M82,267a38,38 0,0 1,38 -38h35v160h-35a38,38 0,0 1,-38 -38z"/>
+    <path android:fillColor="#168DFF" android:pathData="M357,229h35a38,38 0,0 1,38 38v84a38,38 0,0 1,-38 38h-35z"/>
     <path android:fillColor="#17132E" android:pathData="M116,278h19v100h-19z M377,278h19v100h-19z"/>
-    <group android:translateX="40" android:translateY="10">
-        <path android:fillColor="#C2CAD3" android:pathData="M242,176v122c-10,-7 -22,-10 -35,-8 -26,4 -44,23 -40,43 4,20 27,32 53,28 24,-4 41,-20 40,-38v-94l74,-18v-48z"/>
-        <path android:fillColor="#8797A8" android:pathData="M268,194l49,-12v24l-49,12z"/>
+    <group android:translateX="20" android:translateY="10">
+        <path android:fillColor="#F02BE8" android:pathData="M242,176v122c-10,-7 -22,-10 -35,-8 -26,4 -44,23 -40,43 4,20 27,32 53,28 24,-4 41,-20 40,-38v-94l74,-18v-48z"/>
+        <path android:fillColor="#18CFFF" android:pathData="M268,194l49,-12v24l-49,12z"/>
     </group>
 </vector>
