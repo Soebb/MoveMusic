@@ -578,32 +578,43 @@ class MainActivity : Activity() {
     private fun loadNextSongsPage() {
         if (!hasMoreSongs || isLoadingNextPage) return
         isLoadingNextPage = true
-        val nextPage = visibleSongsCache.drop(displayedSongCount).take(50)
-        val batch = nextPage
-        hasMoreSongs = visibleSongsCache.size > displayedSongCount + batch.size
-        displayedSongCount += batch.size
 
-        // Add rows in small UI batches instead of rebuilding the whole list.
-        // This keeps scrolling responsive while the next page is appended.
-        var index = 0
-        fun appendChunk() {
-            val end = minOf(index + 20, batch.size)
-            while (index < end) {
-                addSongRow(batch[index])
-                index++
-            }
-            if (index < batch.size) {
-                uiHandler.post { appendChunk() }
+        // Normal list scrolling appends one page. During fast-scroll dragging,
+        // keep extending directly toward the latest requested index instead of
+        // stopping after each 50-row page.
+        fun appendNextChunk() {
+            val requestedTarget = pendingFastScrollIndex
+            val targetLimit = if (requestedTarget >= displayedSongCount) {
+                (requestedTarget + 1).coerceAtMost(visibleSongsCache.size)
             } else {
-                isLoadingNextPage = false
-                if (pendingFastScrollIndex >= 0) {
-                    val target = pendingFastScrollIndex
-                    pendingFastScrollIndex = -1
-                    scrollToSongIndex(target)
-                }
+                (displayedSongCount + 50).coerceAtMost(visibleSongsCache.size)
+            }
+            val end = minOf(displayedSongCount + 20, targetLimit)
+            while (displayedSongCount < end) {
+                addSongRow(visibleSongsCache[displayedSongCount])
+                displayedSongCount++
+            }
+
+            hasMoreSongs = displayedSongCount < visibleSongsCache.size
+            fastScrollOverlay?.invalidate()
+
+            if (pendingFastScrollIndex >= displayedSongCount &&
+                displayedSongCount < visibleSongsCache.size) {
+                // Continue toward the finger's most recent position without
+                // waiting for another drag event or starting a new page cycle.
+                uiHandler.post { appendNextChunk() }
+                return
+            }
+
+            isLoadingNextPage = false
+            if (pendingFastScrollIndex >= 0) {
+                val target = pendingFastScrollIndex
+                pendingFastScrollIndex = -1
+                scrollToSongIndex(target)
             }
         }
-        appendChunk()
+
+        appendNextChunk()
     }
 
     private fun scrollToSongIndex(index: Int) {
