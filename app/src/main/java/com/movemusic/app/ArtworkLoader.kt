@@ -49,12 +49,12 @@ internal class ArtworkLoader(context: Context) {
                     ?: loadEmbedded(song, targetSize)
             } catch (_: Exception) { null }
 
-            if (bitmap != null) {
-                memoryCache.put(key, bitmap)
-                saveToDisk(key, bitmap)
-            }
+            if (bitmap != null) memoryCache.put(key, bitmap)
             val listeners = synchronized(pending) { pending.remove(key).orEmpty() }
+            // Deliver as soon as decoding finishes; disk persistence must not
+            // delay the visible cover on the main thread.
             listeners.forEach { listener -> try { listener(bitmap) } catch (_: Exception) {} }
+            if (bitmap != null) saveToDisk(key, bitmap)
         }
     }
 
