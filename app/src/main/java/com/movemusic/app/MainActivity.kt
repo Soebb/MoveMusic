@@ -345,11 +345,18 @@ class MainActivity : Activity() {
         val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
             else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
         val source = songs.asSequence().filter { playlistIds == null || it.id in playlistIds }
-        val query = searchQuery.trim()
-        return if (query.isEmpty()) source.toList()
-        else source.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                it.artist.contains(query, ignoreCase = true)
+        val terms = searchQuery.trim()
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+        return if (terms.isEmpty()) source.toList()
+        else source.filter { song ->
+            // Every search term must match either the title or artist.
+            // This supports combined queries such as "song name artist"
+            // and multiple artist names stored in the same artist field.
+            terms.all { term ->
+                song.title.contains(term, ignoreCase = true) ||
+                    song.artist.contains(term, ignoreCase = true)
+            }
         }.toList()
     }
 
