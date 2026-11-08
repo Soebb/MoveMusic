@@ -9,7 +9,9 @@ import android.provider.MediaStore
 import android.util.LruCache
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * Artwork pipeline: memory cache -> persistent disk cache -> MediaStore album
@@ -19,7 +21,14 @@ import java.util.concurrent.Executors
 internal class ArtworkLoader(context: Context) {
     private val appContext = context.applicationContext
     private val diskDirectory = File(appContext.cacheDir, "artwork").apply { mkdirs() }
-    private val executor = Executors.newFixedThreadPool(2)
+    // Keep at most the currently requested album queued. Rapid track skipping
+    // must not leave a long tail of obsolete artwork decodes ahead of the UI.
+    private val executor = ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS, LinkedBlockingDeque<Runnable>()
+    )
+    private inner class ArtworkTask(val key: String, val work: () -> Unit) : Runnable {
+        override fun run() = work()
+    }
     private val memoryCache = object : LruCache<String, Bitmap>(
         (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()
     ) {
@@ -34,15 +43,25 @@ internal class ArtworkLoader(context: Context) {
         var shouldStart = false
         synchronized(pending) {
             val listeners = pending[key]
-            if (listeners != null) listeners.add(callback)
-            else {
+            if (listeners != null) {
+                listeners.add(callback)
+            } else {
+                // Remove queued jobs for albums that are no longer displayed.
+                // Already-running decodes are allowed to finish and populate cache.
+                val obsoleteKeys = pending.keys.filter { it != key }
+                obsoleteKeys.forEach { obsoleteKey ->
+                    pending.remove(obsoleteKey)
+                    executor.queue.removeIf { task ->
+                        task is ArtworkTask && task.key == obsoleteKey
+                    }
+                }
                 pending[key] = mutableListOf(callback)
                 shouldStart = true
             }
         }
         if (!shouldStart) return
 
-        executor.execute {
+        executor.execute(ArtworkTask(key) {
             val bitmap = try {
                 loadFromDisk(key, targetSize)
                     ?: loadFromMediaStore(song.albumId, targetSize)
@@ -55,7 +74,7 @@ internal class ArtworkLoader(context: Context) {
             // delay the visible cover on the main thread.
             listeners.forEach { listener -> try { listener(bitmap) } catch (_: Exception) {} }
             if (bitmap != null) saveToDisk(key, bitmap)
-        }
+        })
     }
 
     private fun loadFromDisk(key: String, targetSize: Int): Bitmap? {
