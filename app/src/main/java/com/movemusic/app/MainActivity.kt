@@ -299,6 +299,22 @@ class MainActivity : Activity() {
         })
         page.forEach { song -> addSongRow(song) }
         this.hasMoreSongs = hasMoreSongs
+        scheduleArtworkPrefetch(page)
+    }
+
+    /**
+     * Warm a tiny batch after the list settles. This keeps initial rendering
+     * and scrolling responsive while making the first few player screens ready.
+     */
+    private fun scheduleArtworkPrefetch(items: List<Song>) {
+        if (items.isEmpty()) return
+        val candidates = items.take(4)
+        uiHandler.postDelayed({
+            if (isFinishing || isDestroyed || playerScreenVisible) return@postDelayed
+            val targetSize = (resources.displayMetrics.widthPixels * 0.78f)
+                .toInt().coerceAtLeast(256)
+            candidates.forEach { artworkLoader.prefetch(it, targetSize) }
+        }, 350L)
     }
 
     private fun addSongRow(song: Song) {
@@ -361,6 +377,7 @@ class MainActivity : Activity() {
         val batch = nextPage.take(50)
         hasMoreSongs = nextPage.size > 50
         displayedSongCount += batch.size
+        scheduleArtworkPrefetch(batch)
 
         // Add rows in small UI batches instead of rebuilding the whole list.
         // This keeps scrolling responsive while the next page is appended.
