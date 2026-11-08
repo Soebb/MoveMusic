@@ -168,9 +168,10 @@ class MainActivity : Activity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         songScrollView = scroll
-        scroll.setOnScrollChangeListener { view: ScrollView, _, scrollY, _, _ ->
-            if (hasMoreSongs && !isLoadingNextPage &&
-                scrollY + view.height >= view.getChildAt(0).height - view.height / 2) {
+        scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            val contentHeight = scroll.getChildAt(0)?.height ?: 0
+            if (hasMoreSongs && !isLoadingNextPage && contentHeight > 0 &&
+                scrollY + scroll.height >= contentHeight - scroll.height / 2) {
                 loadNextSongsPage()
             }
         }
