@@ -9,6 +9,8 @@ import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Handler
@@ -17,6 +19,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import org.json.JSONArray
@@ -63,6 +66,7 @@ class MainActivity : Activity() {
     private var homeRoot: View? = null
     private var miniPlayerHost: LinearLayout? = null
     private var songScrollView: ScrollView? = null
+    private var fastScrollOverlay: FastScrollOverlay? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
 
@@ -247,9 +251,27 @@ class MainActivity : Activity() {
             isFillViewport = true
             addView(body)
         }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        val scrollContainer = FrameLayout(this)
+        scrollContainer.addView(
+            scroll,
+            FrameLayout.LayoutParams(-1, -1)
+        )
+        val fastScroller = FastScrollOverlay(scroll).apply {
+            visibility = View.GONE
+        }
+        scrollContainer.addView(
+            fastScroller,
+            FrameLayout.LayoutParams(
+                (30 * resources.displayMetrics.density).toInt(),
+                -1,
+                Gravity.END
+            )
+        )
+        root.addView(scrollContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songScrollView = scroll
+        fastScrollOverlay = fastScroller
         scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            fastScroller.invalidate()
             val contentHeight = scroll.getChildAt(0)?.height ?: 0
             if (hasMoreSongs && !isLoadingNextPage && contentHeight > 0 &&
                 scrollY + scroll.height >= contentHeight - scroll.height / 2) {
@@ -265,6 +287,108 @@ class MainActivity : Activity() {
         homeRoot = root
         setContentView(root)
         refreshBody()
+    }
+
+    private inner class FastScrollOverlay(
+        private val scrollView: ScrollView
+    ) : View(this@MainActivity) {
+        private val density = resources.displayMetrics.density
+        private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0x55808080
+            strokeWidth = 2.5f * density
+            strokeCap = Paint.Cap.ROUND
+        }
+        private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFBDBDBD.toInt()
+            strokeWidth = 4f * density
+            strokeCap = Paint.Cap.ROUND
+        }
+        private val hideTask = Runnable {
+            visibility = View.GONE
+        }
+        private var dragging = false
+        private var dragOffset = 0f
+
+        private val trackInset get() = 8f * density
+        private val minimumThumb get() = 38f * density
+
+        init {
+            isClickable = true
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        }
+
+        private fun scrollRange(): Int {
+            val contentHeight = scrollView.getChildAt(0)?.height ?: 0
+            return (contentHeight - scrollView.height).coerceAtLeast(0)
+        }
+
+        private fun thumbHeight(): Float {
+            if (height <= 0) return minimumThumb
+            val contentHeight = (scrollView.getChildAt(0)?.height ?: 0).coerceAtLeast(1)
+            return (height.toFloat() * scrollView.height / contentHeight)
+                .coerceAtLeast(minimumThumb)
+                .coerceAtMost(height.toFloat())
+        }
+
+        private fun thumbTop(): Float {
+            val available = (height - thumbHeight()).coerceAtLeast(0f)
+            val range = scrollRange()
+            return if (range == 0) 0f else available * scrollView.scrollY / range
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (scrollRange() <= 0 || height <= 0) return
+            val centerX = width - 7f * density
+            val top = trackInset
+            val bottom = height - trackInset
+            canvas.drawLine(centerX, top, centerX, bottom, trackPaint)
+            val thumb = thumbHeight()
+            val thumbTop = thumbTop().coerceIn(top, (bottom - thumb).coerceAtLeast(top))
+            canvas.drawLine(centerX, thumbTop, centerX, thumbTop + thumb, thumbPaint)
+        }
+
+        private fun moveTo(y: Float) {
+            val range = scrollRange()
+            if (range <= 0) return
+            val available = (height - thumbHeight()).coerceAtLeast(1f)
+            val top = (y - dragOffset - thumbHeight() / 2f)
+                .coerceIn(0f, available)
+            scrollView.scrollTo(0, (top / available * range).toInt())
+            invalidate()
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    uiHandler.removeCallbacks(hideTask)
+                    visibility = View.VISIBLE
+                    val currentTop = thumbTop()
+                    val currentBottom = currentTop + thumbHeight()
+                    dragging = true
+                    dragOffset = if (event.y in currentTop..currentBottom) {
+                        event.y - currentTop - thumbHeight() / 2f
+                    } else {
+                        0f
+                    }
+                    moveTo(event.y)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (dragging) moveTo(event.y)
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    uiHandler.removeCallbacks(hideTask)
+                    uiHandler.postDelayed(hideTask, 1_000L)
+                    return true
+                }
+            }
+            return true
+        }
     }
 
     private fun refreshBody() {
