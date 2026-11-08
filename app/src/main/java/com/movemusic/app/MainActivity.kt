@@ -481,7 +481,14 @@ class MainActivity : Activity() {
         }
         override fun getItemCount() = items.size
         override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): SongHolder {
-            return SongHolder(FrameLayout(this@MainActivity))
+            val container = FrameLayout(this@MainActivity).apply {
+                // RecyclerView items must occupy the full available row width.
+                layoutParams = RecyclerView.LayoutParams(
+                    RecyclerView.LayoutParams.MATCH_PARENT,
+                    RecyclerView.LayoutParams.WRAP_CONTENT
+                )
+            }
+            return SongHolder(container)
         }
         override fun onBindViewHolder(holder: SongHolder, position: Int) {
             val song = items[position]
