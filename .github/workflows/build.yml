@@ -1,7 +1,14 @@
 name: Build and Release MoveMusic APK
 
 on:
-  # Build and publish only when explicitly requested after a feature is complete.
+  # Feature branches stay quiet while work is in progress.
+  # A completed PR is build-validated; merging to main publishes the release.
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
