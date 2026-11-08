@@ -2,6 +2,7 @@ package com.movemusic.app
 
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -16,6 +17,7 @@ class PlaybackService : MediaSessionService() {
         val exoPlayer = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(AudioAttributes.DEFAULT, true)
             setHandleAudioBecomingNoisy(true)
+            setWakeMode(C.WAKE_MODE_LOCAL)
         }
         player = exoPlayer
         mediaSession = MediaSession.Builder(this, exoPlayer).build()
