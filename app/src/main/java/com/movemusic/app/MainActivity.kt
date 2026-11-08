@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ContentUris
 import android.content.ComponentName
+import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaMetadataRetriever
@@ -724,7 +725,7 @@ class MainActivity : Activity() {
         if (playbackQueue.isEmpty() || currentSongIndex !in playbackQueue.indices) return
         if (shuffleEnabled && playbackQueue.size > 1) {
             val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
-            controller.seekToMediaItem(target, 0L)
+            controller.seekTo(target, 0L)
         } else {
             controller.seekToPreviousMediaItem()
         }
