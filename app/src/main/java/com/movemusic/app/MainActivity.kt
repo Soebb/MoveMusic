@@ -96,15 +96,33 @@ class MainActivity : Activity() {
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         toast("پخش این فایل ممکن نیست.")
                     }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        restorePlaybackState()
+                    }
                 })
                 pendingSong?.let {
                     pendingSong = null
                     startSong(it)
-                }
+                } ?: restorePlaybackState()
             } catch (_: Exception) {
                 toast("اتصال به سرویس پخش موسیقی برقرار نشد.")
             }
         }, java.util.concurrent.Executor { command -> runOnUiThread(command) })
+    }
+
+    private fun restorePlaybackState() {
+        val activeUri = player?.currentMediaItem?.localConfiguration?.uri ?: return
+        val song = songs.firstOrNull { it.uri == activeUri } ?: return
+        currentSong = song
+        if (playbackQueue.isEmpty()) playbackQueue = songs.toList()
+        currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
+        miniPlayerHost?.let { host ->
+            host.removeAllViews()
+            host.visibility = View.VISIBLE
+            host.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+        }
+        updatePlayerControls()
     }
 
     private fun showPermissionOrLoad() {
@@ -164,6 +182,7 @@ class MainActivity : Activity() {
                     songs.clear()
                     songs.addAll(loadedSongs)
                     displayedSongCount = 50
+                    restorePlaybackState()
                     render()
                 }
             } catch (e: Exception) {
