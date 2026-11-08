@@ -22,6 +22,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.media3.common.MediaItem
@@ -65,16 +67,13 @@ class MainActivity : Activity() {
     private lateinit var header: TextView
     private var homeRoot: View? = null
     private var miniPlayerHost: LinearLayout? = null
-    private var songScrollView: ScrollView? = null
+    private var songRecyclerView: RecyclerView? = null
+    private var songAdapter: SongAdapter? = null
     private var fastScrollOverlay: FastScrollOverlay? = null
-    private var songRowsStartIndex = 0
-    private var pendingFastScrollIndex = -1
     private var visibleSongsCache: List<Song> = emptyList()
     private var searchQuery = ""
     private var searchField: EditText? = null
     private var searchContainer: LinearLayout? = null
-    private var isLoadingNextPage = false
-    private var hasMoreSongs = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -270,9 +269,7 @@ class MainActivity : Activity() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     searchQuery = s?.toString()?.trim().orEmpty()
-                    displayedSongCount = 50
-                    pendingFastScrollIndex = -1
-                    songScrollView?.scrollTo(0, 0)
+                    songRecyclerView?.scrollToPosition(0)
                     if (::body.isInitialized) refreshBody()
                 }
                 override fun afterTextChanged(s: android.text.Editable?) {}
@@ -288,37 +285,28 @@ class MainActivity : Activity() {
         })
         root.addView(searchContainer)
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(body)
+        root.addView(body, LinearLayout.LayoutParams(-1, -2))
+        val listContainer = FrameLayout(this)
+        val recycler = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            itemAnimator = null
+            setHasFixedSize(false)
         }
-        val scrollContainer = FrameLayout(this)
-        scrollContainer.addView(
-            scroll,
-            FrameLayout.LayoutParams(-1, -1)
-        )
-        val fastScroller = FastScrollOverlay(scroll).apply {
-            visibility = View.VISIBLE
-        }
-        scrollContainer.addView(
-            fastScroller,
-            FrameLayout.LayoutParams(
-                (48 * resources.displayMetrics.density).toInt(),
-                -1,
-                Gravity.END
-            )
-        )
-        root.addView(scrollContainer, LinearLayout.LayoutParams(-1, 0, 1f))
-        songScrollView = scroll
+        songAdapter = SongAdapter()
+        recycler.adapter = songAdapter
+        listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
+        val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
+        listContainer.addView(fastScroller, FrameLayout.LayoutParams(
+            (48 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+        ))
+        root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
+        songRecyclerView = recycler
         fastScrollOverlay = fastScroller
-        scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            fastScroller.invalidate()
-            val contentHeight = scroll.getChildAt(0)?.height ?: 0
-            if (hasMoreSongs && !isLoadingNextPage && contentHeight > 0 &&
-                scrollY + scroll.height >= contentHeight - scroll.height / 2) {
-                loadNextSongsPage()
+        recycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                fastScroller.invalidate()
             }
-        }
+        })
         val miniHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (currentSong != null) miniHost.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
         else miniHost.visibility = View.GONE
@@ -362,7 +350,7 @@ class MainActivity : Activity() {
     }
 
     private inner class FastScrollOverlay(
-        private val scrollView: ScrollView
+        private val recyclerView: RecyclerView
     ) : View(this@MainActivity) {
         private val density = resources.displayMetrics.density
         private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -375,107 +363,69 @@ class MainActivity : Activity() {
             strokeWidth = 4f * density
             strokeCap = Paint.Cap.ROUND
         }
-        private val hideTask = Runnable {
-            indicatorVisible = false
-            invalidate()
-        }
+        private val hideTask = Runnable { indicatorVisible = false; invalidate() }
         private var dragging = false
         private var indicatorVisible = false
         private var dragOffset = 0f
-        private var lastTargetIndex = -1
-
         private val trackInset get() = 8f * density
         private val minimumThumb get() = 38f * density
 
         init {
-            // Keep a transparent touch strip attached: a GONE view cannot receive
-            // ACTION_DOWN, so the fast scroller could never be grabbed by the user.
             isClickable = true
             isFocusable = true
             setBackgroundColor(Color.TRANSPARENT)
         }
 
-        private fun scrollRange(): Int {
-            val contentHeight = scrollView.getChildAt(0)?.height ?: 0
-            return (contentHeight - scrollView.height).coerceAtLeast(0)
-        }
-
-        private fun totalSongCount(): Int = visibleSongsCache.size
-
-        private fun estimatedRowHeight(): Float {
-            val loaded = displayedSongCount.coerceAtLeast(1)
-            val contentHeight = scrollView.getChildAt(0)?.height ?: 0
-            return (contentHeight.toFloat() / loaded).coerceAtLeast(1f)
-        }
-
-        private fun estimatedContentHeight(): Float {
-            return (totalSongCount() * estimatedRowHeight()).coerceAtLeast(height.toFloat())
-        }
-
+        private fun totalCount() = visibleSongsCache.size
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
-            return (height.toFloat() * height / estimatedContentHeight())
-                .coerceAtLeast(minimumThumb)
-                .coerceAtMost(height.toFloat())
+            val count = totalCount().coerceAtLeast(1)
+            val visible = (recyclerView.height / (56f * density)).toInt().coerceAtLeast(1)
+            return (height.toFloat() * visible / count).coerceAtLeast(minimumThumb).coerceAtMost(height.toFloat())
         }
-
+        private fun currentPosition(): Int {
+            val manager = recyclerView.layoutManager as? LinearLayoutManager ?: return 0
+            return manager.findFirstVisibleItemPosition().coerceAtLeast(0)
+        }
         private fun thumbTop(): Float {
             val available = (height - thumbHeight()).coerceAtLeast(0f)
-            val estimatedRange = (estimatedContentHeight() - height).coerceAtLeast(1f)
-            return available * (scrollView.scrollY.toFloat() / estimatedRange).coerceIn(0f, 1f)
+            val maxIndex = (totalCount() - 1).coerceAtLeast(1)
+            return available * (currentPosition().toFloat() / maxIndex).coerceIn(0f, 1f)
         }
-
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (!indicatorVisible || scrollRange() <= 0 || height <= 0) return
-            val centerX = width - 7f * density
+            if (!indicatorVisible || totalCount() <= 0 || height <= 0) return
+            val x = width - 7f * density
             val top = trackInset
             val bottom = height - trackInset
-            canvas.drawLine(centerX, top, centerX, bottom, trackPaint)
+            canvas.drawLine(x, top, x, bottom, trackPaint)
             val thumb = thumbHeight()
             val thumbTop = thumbTop().coerceIn(top, (bottom - thumb).coerceAtLeast(top))
-            canvas.drawLine(centerX, thumbTop, centerX, thumbTop + thumb, thumbPaint)
+            canvas.drawLine(x, thumbTop, x, thumbTop + thumb, thumbPaint)
         }
-
         private fun moveTo(y: Float) {
             val available = (height - thumbHeight()).coerceAtLeast(1f)
-            val top = (y - dragOffset - thumbHeight() / 2f)
-                .coerceIn(0f, available)
+            val top = (y - dragOffset - thumbHeight() / 2f).coerceIn(0f, available)
             val fraction = (top / available).coerceIn(0f, 1f)
-            val totalSongs = totalSongCount()
-            if (totalSongs > 0) {
-                val targetIndex = (fraction * (totalSongs - 1)).toInt()
-                if (targetIndex != lastTargetIndex) {
-                    lastTargetIndex = targetIndex
-                    scrollToSongIndex(targetIndex)
-                }
-            }
+            val count = totalCount()
+            if (count > 0) recyclerView.scrollToPosition((fraction * (count - 1)).toInt())
             invalidate()
         }
-
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     uiHandler.removeCallbacks(hideTask)
                     indicatorVisible = true
-                    invalidate()
-                    val currentTop = thumbTop()
-                    val currentBottom = currentTop + thumbHeight()
+                    val top = thumbTop()
+                    val bottom = top + thumbHeight()
                     dragging = true
-                    lastTargetIndex = -1
-                    dragOffset = if (event.y in currentTop..currentBottom) {
-                        event.y - currentTop - thumbHeight() / 2f
-                    } else {
-                        0f
-                    }
+                    dragOffset = if (event.y in top..bottom) event.y - top - thumbHeight() / 2f else 0f
                     moveTo(event.y)
                     parent?.requestDisallowInterceptTouchEvent(true)
+                    invalidate()
                     return true
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    if (dragging) moveTo(event.y)
-                    return true
-                }
+                MotionEvent.ACTION_MOVE -> { if (dragging) moveTo(event.y); return true }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     dragging = false
                     parent?.requestDisallowInterceptTouchEvent(false)
@@ -496,8 +446,6 @@ class MainActivity : Activity() {
         ))
         val allVisibleSongs = visibleSongSource()
         visibleSongsCache = allVisibleSongs
-        val page = allVisibleSongs.take(displayedSongCount)
-        this.hasMoreSongs = allVisibleSongs.size > displayedSongCount
         if (currentPlaylist != "همه آهنگ‌ها" && searchQuery.isEmpty()) {
             body.addView(button("افزودن همه آهنگ‌ها به این پلی‌لیست") {
                 val target = playlists[currentPlaylist] ?: return@button
@@ -510,12 +458,6 @@ class MainActivity : Activity() {
                       else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
             })
         }
-        if (page.isEmpty()) {
-            body.addView(label(
-                if (searchQuery.isEmpty()) "اینجا هنوز آهنگی نیست." else "نتیجه‌ای پیدا نشد.",
-                13, muted
-            ))
-        }
         if (searchQuery.isEmpty()) {
             body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
                 shuffleEnabled = !shuffleEnabled
@@ -523,12 +465,30 @@ class MainActivity : Activity() {
                 toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
             })
         }
-        songRowsStartIndex = body.childCount
-        page.forEach { song -> addSongRow(song) }
+        songAdapter?.setSongs(allVisibleSongs)
+        songRecyclerView?.scrollToPosition(0)
         fastScrollOverlay?.invalidate()
     }
 
-    private fun addSongRow(song: Song) {
+    private inner class SongAdapter : RecyclerView.Adapter<SongAdapter.SongHolder>() {
+        private var items: List<Song> = emptyList()
+        inner class SongHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
+        fun setSongs(songs: List<Song>) {
+            items = songs
+            notifyDataSetChanged()
+        }
+        override fun getItemCount() = items.size
+        override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): SongHolder {
+            return SongHolder(FrameLayout(this@MainActivity))
+        }
+        override fun onBindViewHolder(holder: SongHolder, position: Int) {
+            val song = items[position]
+            holder.container.removeAllViews()
+            holder.container.addView(buildSongRow(song), FrameLayout.LayoutParams(-1, -2))
+        }
+    }
+
+    private fun buildSongRow(song: Song): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -540,30 +500,21 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         details.addView(TextView(this).apply {
-            text = song.title
-            textSize = 14f
-            setTextColor(white)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            text = song.title; textSize = 14f; setTextColor(white)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
         })
         details.addView(TextView(this).apply {
-            text = song.artist
-            textSize = 11f
-            setTextColor(muted)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            text = song.artist; textSize = 11f; setTextColor(muted)
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
         })
         row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
         val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
         if (currentPlaylist != "همه آهنگ‌ها") {
             actions.addView(button("انتقال") { moveSong(song) })
             actions.addView(button("حذف") {
-                playlists[currentPlaylist]?.remove(song.id)
-                savePlaylists()
-                refreshBody()
+                playlists[currentPlaylist]?.remove(song.id); savePlaylists(); refreshBody()
             })
         } else {
             actions.addView(button("+ لیست") { addSong(song) })
@@ -572,68 +523,7 @@ class MainActivity : Activity() {
         row.isClickable = true
         row.isFocusable = true
         row.setOnClickListener { play(song) }
-        body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 3 })
-    }
-
-    private fun loadNextSongsPage() {
-        if (!hasMoreSongs || isLoadingNextPage) return
-        isLoadingNextPage = true
-
-        // Normal list scrolling appends one page. During fast-scroll dragging,
-        // keep extending directly toward the latest requested index instead of
-        // stopping after each 50-row page.
-        fun appendNextChunk() {
-            val requestedTarget = pendingFastScrollIndex
-            val targetLimit = if (requestedTarget >= displayedSongCount) {
-                (requestedTarget + 1).coerceAtMost(visibleSongsCache.size)
-            } else {
-                (displayedSongCount + 50).coerceAtMost(visibleSongsCache.size)
-            }
-            val end = minOf(displayedSongCount + 20, targetLimit)
-            while (displayedSongCount < end) {
-                addSongRow(visibleSongsCache[displayedSongCount])
-                displayedSongCount++
-            }
-
-            hasMoreSongs = displayedSongCount < visibleSongsCache.size
-            fastScrollOverlay?.invalidate()
-
-            if (pendingFastScrollIndex >= displayedSongCount &&
-                displayedSongCount < visibleSongsCache.size) {
-                // Continue toward the finger's most recent position without
-                // waiting for another drag event or starting a new page cycle.
-                uiHandler.post { appendNextChunk() }
-                return
-            }
-
-            isLoadingNextPage = false
-            if (pendingFastScrollIndex >= 0) {
-                val target = pendingFastScrollIndex
-                pendingFastScrollIndex = -1
-                scrollToSongIndex(target)
-            }
-        }
-
-        appendNextChunk()
-    }
-
-    private fun scrollToSongIndex(index: Int) {
-        val totalSongs = visibleSongsCache.size
-        if (totalSongs == 0) return
-        val target = index.coerceIn(0, totalSongs - 1)
-
-        if (target >= displayedSongCount && hasMoreSongs) {
-            pendingFastScrollIndex = target
-            if (!isLoadingNextPage) loadNextSongsPage()
-            return
-        }
-        if (isLoadingNextPage) {
-            pendingFastScrollIndex = target
-            return
-        }
-
-        val row = body.getChildAt(songRowsStartIndex + target) ?: return
-        songScrollView?.scrollTo(0, row.top)
+        return row
     }
 
     private fun moveSong(song: Song) {
