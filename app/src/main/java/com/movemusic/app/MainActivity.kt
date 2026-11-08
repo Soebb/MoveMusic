@@ -718,15 +718,17 @@ class MainActivity : Activity() {
     private fun readArtworkBytes(song: Song): ByteArray? {
         // Android's MediaStore album-art provider is much cheaper than opening
         // and parsing the whole audio file with MediaMetadataRetriever.
-        if (song.albumId > 0L) {
-            val albumArtUri = Uri.parse("content://media/external/audio/albumart/${song.albumId}")
-            try {
-                contentResolver.openInputStream(albumArtUri)?.use { return it.readBytes() }
-            } catch (_: Exception) {
-                // Some devices do not expose album art through this provider.
-            }
+        if (song.albumId <= 0L) return null
+        val albumArtUri = Uri.parse("content://media/external/audio/albumart/${song.albumId}")
+        return try {
+            contentResolver.openInputStream(albumArtUri)?.use { it.readBytes() }
+        } catch (_: Exception) {
+            // Some devices do not expose album art through this provider.
+            null
         }
+    }
 
+    private fun readEmbeddedArtworkBytes(song: Song): ByteArray? {
         // Fallback for files whose artwork is embedded but not indexed by MediaStore.
         var retriever: MediaMetadataRetriever? = null
         return try {
@@ -763,11 +765,16 @@ class MainActivity : Activity() {
                 }
 
                 if (bitmap == null) {
-                    val bytes = readArtworkBytes(song)
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        bitmap = decodeArtwork(bytes, requestedSize)
-                        if (bitmap != null) {
-                            val tempFile = File(artworkCacheDir, "$key.tmp")
+                    var bytes = readArtworkBytes(song)
+                    bitmap = bytes?.takeIf { it.isNotEmpty() }?.let { decodeArtwork(it, requestedSize) }
+                    if (bitmap == null) {
+                        // If MediaStore returned an unreadable image, try the
+                        // original file's embedded artwork before giving up.
+                        bytes = readEmbeddedArtworkBytes(song)
+                        bitmap = bytes?.takeIf { it.isNotEmpty() }?.let { decodeArtwork(it, requestedSize) }
+                    }
+                    if (bitmap != null && bytes != null) {
+                        val tempFile = File(artworkCacheDir, "$key.tmp")
                             try {
                                 FileOutputStream(tempFile).use { it.write(bytes) }
                                 val finalFile = File(artworkCacheDir, "$key.img")
