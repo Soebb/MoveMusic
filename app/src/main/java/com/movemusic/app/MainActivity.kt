@@ -736,7 +736,7 @@ class MainActivity : Activity() {
         if (playbackQueue.size < 2 || currentSongIndex !in playbackQueue.indices) return
         if (shuffleEnabled) {
             val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
-            controller.seekToMediaItem(target, 0L)
+            controller.seekTo(target, 0L)
         } else {
             controller.seekToNextMediaItem()
         }
