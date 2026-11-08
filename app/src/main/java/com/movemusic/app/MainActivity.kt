@@ -215,63 +215,87 @@ class MainActivity : Activity() {
             refreshBody()
             toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
         })
-        page.forEach { song ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(10, 5, 6, 5)
-                setBackgroundColor(panel)
-            }
-            val details = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            details.addView(TextView(this).apply {
-                text = song.title
-                textSize = 14f
-                setTextColor(white)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            details.addView(TextView(this).apply {
-                text = song.artist
-                textSize = 11f
-                setTextColor(muted)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-            val actions = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            if (currentPlaylist != "همه آهنگ‌ها") {
-                actions.addView(button("انتقال") { moveSong(song) })
-                actions.addView(button("حذف") {
-                    playlists[currentPlaylist]?.remove(song.id)
-                    savePlaylists()
-                    refreshBody()
-                })
-            } else {
-                actions.addView(button("+ لیست") { addSong(song) })
-            }
-            row.addView(actions)
-            row.isClickable = true
-            row.isFocusable = true
-            row.setOnClickListener { play(song) }
-            val lp = LinearLayout.LayoutParams(-1, -2)
-            lp.bottomMargin = 3
-            body.addView(row, lp)
-        }
+        page.forEach { song -> addSongRow(song) }
         this.hasMoreSongs = hasMoreSongs
+    }
+
+    private fun addSongRow(song: Song) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(10, 5, 6, 5)
+            setBackgroundColor(panel)
+        }
+        val details = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        details.addView(TextView(this).apply {
+            text = song.title
+            textSize = 14f
+            setTextColor(white)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        details.addView(TextView(this).apply {
+            text = song.artist
+            textSize = 11f
+            setTextColor(muted)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        if (currentPlaylist != "همه آهنگ‌ها") {
+            actions.addView(button("انتقال") { moveSong(song) })
+            actions.addView(button("حذف") {
+                playlists[currentPlaylist]?.remove(song.id)
+                savePlaylists()
+                refreshBody()
+            })
+        } else {
+            actions.addView(button("+ لیست") { addSong(song) })
+        }
+        row.addView(actions)
+        row.isClickable = true
+        row.isFocusable = true
+        row.setOnClickListener { play(song) }
+        body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 3 })
     }
 
     private fun loadNextSongsPage() {
         if (!hasMoreSongs || isLoadingNextPage) return
         isLoadingNextPage = true
-        displayedSongCount += 50
-        refreshBody()
-        isLoadingNextPage = false
+        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+        val nextPage = songs.asSequence()
+            .filter { playlistIds == null || it.id in playlistIds }
+            .drop(displayedSongCount)
+            .take(51)
+            .toList()
+        val batch = nextPage.take(50)
+        hasMoreSongs = nextPage.size > 50
+        displayedSongCount += batch.size
+
+        // Add rows in small UI batches instead of rebuilding the whole list.
+        // This keeps scrolling responsive while the next page is appended.
+        var index = 0
+        fun appendChunk() {
+            val end = minOf(index + 10, batch.size)
+            while (index < end) {
+                addSongRow(batch[index])
+                index++
+            }
+            if (index < batch.size) {
+                uiHandler.post { appendChunk() }
+            } else {
+                isLoadingNextPage = false
+            }
+        }
+        appendChunk()
     }
 
     private fun moveSong(song: Song) {
