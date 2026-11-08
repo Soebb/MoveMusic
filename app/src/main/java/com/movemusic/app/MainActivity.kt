@@ -28,6 +28,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import coil3.load
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.size.Precision
 
 data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri)
 
@@ -117,6 +120,7 @@ class MainActivity : Activity() {
         currentSong = song
         if (playbackQueue.isEmpty()) playbackQueue = songs
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
+        if (songChanged) prefetchAdjacentArtwork(currentSongIndex)
         if (playerScreenVisible) {
             // Avoid rebuilding the screen for the initial transition of the
             // track that is already displayed.
@@ -434,6 +438,7 @@ class MainActivity : Activity() {
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         currentSong = song
+        prefetchAdjacentArtwork(currentSongIndex)
         showPlayerScreen()
         startSong(song)
     }
@@ -669,12 +674,39 @@ class MainActivity : Activity() {
             setOnClickListener { action() }
         }
 
+    private fun artworkUri(song: Song): Uri =
+        Uri.withAppendedPath(song.uri, "albumart")
+
     private fun loadSongArtwork(song: Song, target: ImageView) {
-        // Match Chocola's MediaStore URI convention and let Coil own image
-        // loading, request lifecycle, decoding and memory caching.
-        val artworkUri = Uri.withAppendedPath(song.uri, "albumart")
+        // INEXACT lets Coil reuse a larger cached bitmap and avoid decoding
+        // beyond the source image's native dimensions. ImageView scales it.
         target.scaleType = ImageView.ScaleType.CENTER_CROP
-        target.load(artworkUri)
+        target.load(artworkUri(song)) {
+            precision(Precision.INEXACT)
+        }
+    }
+
+    private fun prefetchAdjacentArtwork(index: Int) {
+        if (index !in playbackQueue.indices) return
+
+        // Match the player cover's requested dimensions so the prefetched
+        // result is reusable when the user opens the adjacent track.
+        val size = (resources.displayMetrics.widthPixels * 0.78f)
+            .toInt()
+            .coerceAtLeast(1)
+        val imageLoader = SingletonImageLoader.get(applicationContext)
+
+        listOf(index - 1, index + 1)
+            .filter { it in playbackQueue.indices }
+            .distinct()
+            .forEach { adjacentIndex ->
+                val request = ImageRequest.Builder(applicationContext)
+                    .data(artworkUri(playbackQueue[adjacentIndex]))
+                    .size(size, size)
+                    .precision(Precision.INEXACT)
+                    .build()
+                imageLoader.enqueue(request)
+            }
     }
 
     private fun playerControl(iconRes: Int, size: Int, action: () -> Unit): ImageButton =
