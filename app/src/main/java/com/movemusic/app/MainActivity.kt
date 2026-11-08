@@ -88,9 +88,6 @@ class MainActivity : Activity() {
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         updatePlayerControls()
-                        if (playbackState == Player.STATE_ENDED && shuffleEnabled) {
-                            playNextSong()
-                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -117,10 +114,14 @@ class MainActivity : Activity() {
         currentSong = song
         if (playbackQueue.isEmpty()) playbackQueue = songs.toList()
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
-        miniPlayerHost?.let { host ->
-            host.removeAllViews()
-            host.visibility = View.VISIBLE
-            host.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+        if (playerScreenVisible) {
+            showPlayerScreen()
+        } else {
+            miniPlayerHost?.let { host ->
+                host.removeAllViews()
+                host.visibility = View.VISIBLE
+                host.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
+            }
         }
         updatePlayerControls()
     }
@@ -435,15 +436,20 @@ class MainActivity : Activity() {
             return
         }
         try {
-            val metadata = MediaMetadata.Builder()
-                .setTitle(song.title)
-                .setArtist(song.artist)
-                .build()
-            val item = MediaItem.Builder()
-                .setUri(song.uri)
-                .setMediaMetadata(metadata)
-                .build()
-            controller.setMediaItem(item)
+            val items = playbackQueue.map { queuedSong ->
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(queuedSong.title)
+                    .setArtist(queuedSong.artist)
+                    .build()
+                MediaItem.Builder()
+                    .setMediaId(queuedSong.id.toString())
+                    .setUri(queuedSong.uri)
+                    .setMediaMetadata(metadata)
+                    .build()
+            }
+            val selectedIndex = playbackQueue.indexOfFirst { it.id == song.id }
+                .takeIf { it >= 0 } ?: 0
+            controller.setMediaItems(items, selectedIndex, 0L)
             controller.prepare()
             controller.play()
             updatePlayerControls()
@@ -702,23 +708,25 @@ class MainActivity : Activity() {
     }
 
     private fun playPreviousSong() {
+        val controller = player ?: return
         if (playbackQueue.isEmpty() || currentSongIndex !in playbackQueue.indices) return
-        currentSongIndex = if (currentSongIndex <= 0) playbackQueue.lastIndex else currentSongIndex - 1
-        currentSong = playbackQueue[currentSongIndex]
-        if (playerScreenVisible) showPlayerScreen() else render()
-        startSong(playbackQueue[currentSongIndex])
+        if (shuffleEnabled && playbackQueue.size > 1) {
+            val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
+            controller.seekToMediaItem(target, 0L)
+        } else {
+            controller.seekToPreviousMediaItem()
+        }
     }
 
     private fun playNextSong(manual: Boolean = false) {
+        val controller = player ?: return
         if (playbackQueue.size < 2 || currentSongIndex !in playbackQueue.indices) return
-        currentSongIndex = if (shuffleEnabled) {
-            (playbackQueue.indices.filter { it != currentSongIndex }).random()
+        if (shuffleEnabled) {
+            val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
+            controller.seekToMediaItem(target, 0L)
         } else {
-            (currentSongIndex + 1) % playbackQueue.size
+            controller.seekToNextMediaItem()
         }
-        currentSong = playbackQueue[currentSongIndex]
-        if (playerScreenVisible) showPlayerScreen() else render()
-        startSong(playbackQueue[currentSongIndex])
     }
 
     @Suppress("DEPRECATION")
