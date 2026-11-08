@@ -179,7 +179,9 @@ class MainActivity : Activity() {
                 contentResolver.query(
                     collection,
                     projection,
-                    "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+                    """${MediaStore.Audio.Media.IS_MUSIC} != 0
+                        OR ${MediaStore.Audio.Media.MIME_TYPE} IN ('audio/wav', 'audio/x-wav', 'audio/vnd.wave', 'audio/wave')
+                        OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%.wav'""".trimIndent(),
                     null,
                     "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
                 )?.use { cursor ->
