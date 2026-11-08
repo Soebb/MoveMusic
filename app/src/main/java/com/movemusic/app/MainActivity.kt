@@ -297,12 +297,12 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams(-1, -1)
         )
         val fastScroller = FastScrollOverlay(scroll).apply {
-            visibility = View.GONE
+            visibility = View.VISIBLE
         }
         scrollContainer.addView(
             fastScroller,
             FrameLayout.LayoutParams(
-                (30 * resources.displayMetrics.density).toInt(),
+                (48 * resources.displayMetrics.density).toInt(),
                 -1,
                 Gravity.END
             )
@@ -375,16 +375,22 @@ class MainActivity : Activity() {
             strokeCap = Paint.Cap.ROUND
         }
         private val hideTask = Runnable {
-            visibility = View.GONE
+            indicatorVisible = false
+            invalidate()
         }
         private var dragging = false
+        private var indicatorVisible = false
         private var dragOffset = 0f
 
         private val trackInset get() = 8f * density
         private val minimumThumb get() = 38f * density
 
         init {
+            // Keep a transparent touch strip attached: a GONE view cannot receive
+            // ACTION_DOWN, so the fast scroller could never be grabbed by the user.
             isClickable = true
+            isFocusable = true
+            setBackgroundColor(Color.TRANSPARENT)
             setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         }
 
@@ -416,7 +422,7 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (scrollRange() <= 0 || height <= 0) return
+            if (!indicatorVisible || scrollRange() <= 0 || height <= 0) return
             val centerX = width - 7f * density
             val top = trackInset
             val bottom = height - trackInset
@@ -443,7 +449,8 @@ class MainActivity : Activity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     uiHandler.removeCallbacks(hideTask)
-                    visibility = View.VISIBLE
+                    indicatorVisible = true
+                    invalidate()
                     val currentTop = thumbTop()
                     val currentBottom = currentTop + thumbHeight()
                     dragging = true
