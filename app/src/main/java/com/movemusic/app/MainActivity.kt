@@ -114,11 +114,14 @@ class MainActivity : Activity() {
     private fun restorePlaybackState() {
         val activeUri = player?.currentMediaItem?.localConfiguration?.uri ?: return
         val song = songs.firstOrNull { it.uri == activeUri } ?: return
+        val songChanged = currentSong?.id != song.id
         currentSong = song
-        if (playbackQueue.isEmpty()) playbackQueue = songs.toList()
+        if (playbackQueue.isEmpty()) playbackQueue = songs
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         if (playerScreenVisible) {
-            showPlayerScreen()
+            // Avoid rebuilding the screen for the initial transition of the
+            // track that is already displayed.
+            if (songChanged) showPlayerScreen()
         } else {
             miniPlayerHost?.let { host ->
                 host.removeAllViews()
@@ -419,7 +422,8 @@ class MainActivity : Activity() {
 
     private fun play(song: Song) {
         playbackQueue = if (currentPlaylist == "همه آهنگ‌ها") {
-            songs.toList()
+            // Reuse the loaded library instead of copying it on every tap.
+            songs
         } else {
             // Use a hash set for membership checks. List.contains() here made
             // playlist startup increasingly slow as both library and playlist grew.
@@ -705,7 +709,12 @@ class MainActivity : Activity() {
         }
 
     private fun updatePlayerControls() {
-        val icon = if (player?.isPlaying == true) android.R.drawable.ic_media_pause
+        val activePlayer = player
+        // Update optimistically from playWhenReady so the icon follows the
+        // user's command instead of waiting for decoder startup.
+        val shouldShowPause = activePlayer?.playWhenReady == true &&
+            activePlayer.playbackState != Player.STATE_ENDED
+        val icon = if (shouldShowPause) android.R.drawable.ic_media_pause
                    else android.R.drawable.ic_media_play
         playPauseButton?.setImageResource(icon)
         miniPlayPauseButton?.setImageResource(icon)
