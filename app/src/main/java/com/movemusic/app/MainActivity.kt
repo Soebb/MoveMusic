@@ -4,9 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ContentUris
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.MediaPlayer
 import android.media.MediaMetadataRetriever
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -22,6 +22,12 @@ import android.view.View
 import android.widget.*
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 
 data class Song(val id: Long, val title: String, val artist: String, val uri: Uri)
 
@@ -36,7 +42,9 @@ class MainActivity : Activity() {
     private val songs = mutableListOf<Song>()
     private var currentPlaylist = "همه آهنگ‌ها"
     private var displayedSongCount = 50
-    private var player: MediaPlayer? = null
+    private var player: MediaController? = null
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var pendingSong: Song? = null
     private var playbackQueue: List<Song> = emptyList()
     private var currentSongIndex = -1
     private var shuffleEnabled = false
@@ -57,7 +65,46 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadPlaylists()
+        connectPlaybackController()
         showPermissionOrLoad()
+    }
+
+    private fun connectPlaybackController() {
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+            try {
+                val controller = future.get()
+                if (isFinishing || isDestroyed) {
+                    controller.release()
+                    return@addListener
+                }
+                player = controller
+                controller.addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        updatePlayerControls()
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        updatePlayerControls()
+                        if (playbackState == Player.STATE_ENDED && shuffleEnabled) {
+                            playNextSong()
+                        }
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        toast("پخش این فایل ممکن نیست.")
+                    }
+                })
+                pendingSong?.let {
+                    pendingSong = null
+                    startSong(it)
+                }
+            } catch (_: Exception) {
+                toast("اتصال به سرویس پخش موسیقی برقرار نشد.")
+            }
+        }, java.util.concurrent.Executor { command -> runOnUiThread(command) })
     }
 
     private fun showPermissionOrLoad() {
@@ -363,38 +410,24 @@ class MainActivity : Activity() {
     }
 
     private fun startSong(song: Song) {
+        val controller = player
+        if (controller == null) {
+            pendingSong = song
+            return
+        }
         try {
-            // Detach callbacks before releasing the previous player so a late
-            // error from the old track cannot show a misleading message.
-            player?.setOnPreparedListener(null)
-            player?.setOnCompletionListener(null)
-            player?.setOnErrorListener(null)
-            player?.release()
-
-            val newPlayer = MediaPlayer()
-            player = newPlayer
-            newPlayer.setOnPreparedListener { mp ->
-                if (player !== mp) return@setOnPreparedListener
-                try {
-                    mp.start()
-                    updatePlayerControls()
-                } catch (_: Exception) {
-                    if (player === mp) toast("پخش این فایل ممکن نیست.")
-                }
-            }
-            newPlayer.setOnCompletionListener { mp ->
-                // Auto-advance only in shuffle mode. In normal mode, leave
-                // playback stopped at the end of the current track.
-                if (player === mp && shuffleEnabled) playNextSong()
-            }
-            newPlayer.setOnErrorListener { mp, _, _ ->
-                if (player === mp && currentSong?.id == song.id) {
-                    toast("پخش این فایل ممکن نیست.")
-                }
-                true
-            }
-            newPlayer.setDataSource(this, song.uri)
-            newPlayer.prepareAsync()
+            val metadata = MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artist)
+                .build()
+            val item = MediaItem.Builder()
+                .setUri(song.uri)
+                .setMediaMetadata(metadata)
+                .build()
+            controller.setMediaItem(item)
+            controller.prepare()
+            controller.play()
+            updatePlayerControls()
         } catch (_: Exception) {
             toast("باز کردن فایل موسیقی ممکن نشد.")
         }
@@ -454,10 +487,8 @@ class MainActivity : Activity() {
             override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
                     val p = player ?: return
-                    if (p.isPlaying || p.currentPosition >= 0) {
-                        val duration = p.duration
-                        if (duration > 0) p.seekTo(duration * progress / 1000)
-                    }
+                    val duration = p.duration
+                    if (duration > 0) p.seekTo(duration * progress / 1000L)
                 }
             }
             override fun onStartTrackingTouch(bar: SeekBar?) {}
@@ -623,7 +654,12 @@ class MainActivity : Activity() {
     private fun togglePlayback() {
         val p = player ?: return
         try {
-            if (p.isPlaying) p.pause() else p.start()
+            if (p.isPlaying) {
+                p.pause()
+            } else {
+                if (p.playbackState == Player.STATE_ENDED) p.seekTo(0)
+                p.play()
+            }
             updatePlayerControls()
         } catch (_: Exception) {}
     }
@@ -635,7 +671,7 @@ class MainActivity : Activity() {
                 if (!playerScreenVisible) return
                 try {
                     val p = player
-                    if (p != null && p.isPlaying && p.duration > 0) {
+                    if (p != null && p.duration > 0) {
                         seek.progress = (p.currentPosition * 1000L / p.duration).toInt()
                     }
                 } catch (_: Exception) {}
@@ -716,5 +752,12 @@ class MainActivity : Activity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-    override fun onDestroy() { uiHandler.removeCallbacksAndMessages(null); player?.release(); player = null; super.onDestroy() }
+    override fun onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null)
+        pendingSong = null
+        player?.release()
+        player = null
+        controllerFuture = null
+        super.onDestroy()
+    }
 }
