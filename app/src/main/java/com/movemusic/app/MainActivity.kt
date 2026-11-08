@@ -674,11 +674,7 @@ class MainActivity : Activity() {
         // loading, request lifecycle, decoding and memory caching.
         val artworkUri = Uri.withAppendedPath(song.uri, "albumart")
         target.scaleType = ImageView.ScaleType.CENTER_CROP
-        target.load(artworkUri) {
-            placeholder(android.R.drawable.ic_media_play)
-            error(android.R.drawable.ic_media_play)
-            crossfade(false)
-        }
+        target.load(artworkUri)
     }
 
     private fun playerControl(iconRes: Int, size: Int, action: () -> Unit): ImageButton =
