@@ -69,6 +69,7 @@ class MainActivity : Activity() {
     private var fastScrollOverlay: FastScrollOverlay? = null
     private var songRowsStartIndex = 0
     private var pendingFastScrollIndex = -1
+    private var visibleSongsCache: List<Song> = emptyList()
     private var searchQuery = ""
     private var searchField: EditText? = null
     private var searchContainer: LinearLayout? = null
@@ -381,6 +382,7 @@ class MainActivity : Activity() {
         private var dragging = false
         private var indicatorVisible = false
         private var dragOffset = 0f
+        private var lastTargetIndex = -1
 
         private val trackInset get() = 8f * density
         private val minimumThumb get() = 38f * density
@@ -391,7 +393,6 @@ class MainActivity : Activity() {
             isClickable = true
             isFocusable = true
             setBackgroundColor(Color.TRANSPARENT)
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         }
 
         private fun scrollRange(): Int {
@@ -399,25 +400,23 @@ class MainActivity : Activity() {
             return (contentHeight - scrollView.height).coerceAtLeast(0)
         }
 
-        private fun totalSongCount(): Int {
-            return visibleSongSource().size
-        }
+        private fun totalSongCount(): Int = visibleSongsCache.size
 
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
-            val estimatedContentHeight = (totalSongCount() * 72f * density)
-                .coerceAtLeast(height.toFloat())
-            return (height.toFloat() * height / estimatedContentHeight)
+            val range = scrollRange()
+            if (range <= 0) return height.toFloat()
+            // Derive thumb size from the real ScrollView range, not a guessed row height.
+            return (height.toFloat() * height / (height + range))
                 .coerceAtLeast(minimumThumb)
                 .coerceAtMost(height.toFloat())
         }
 
         private fun thumbTop(): Float {
             val available = (height - thumbHeight()).coerceAtLeast(0f)
-            val total = totalSongCount()
-            if (total <= 1) return 0f
-            val firstVisibleIndex = scrollView.scrollY / (72f * density)
-            return available * (firstVisibleIndex / (total - 1f)).coerceIn(0f, 1f)
+            val range = scrollRange()
+            if (range <= 0) return 0f
+            return available * (scrollView.scrollY.toFloat() / range).coerceIn(0f, 1f)
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -437,10 +436,13 @@ class MainActivity : Activity() {
             val top = (y - dragOffset - thumbHeight() / 2f)
                 .coerceIn(0f, available)
             val fraction = (top / available).coerceIn(0f, 1f)
-            val totalSongs = visibleSongSource().size
+            val totalSongs = totalSongCount()
             if (totalSongs > 0) {
                 val targetIndex = (fraction * (totalSongs - 1)).toInt()
-                scrollToSongIndex(targetIndex)
+                if (targetIndex != lastTargetIndex) {
+                    lastTargetIndex = targetIndex
+                    scrollToSongIndex(targetIndex)
+                }
             }
             invalidate()
         }
@@ -454,6 +456,7 @@ class MainActivity : Activity() {
                     val currentTop = thumbTop()
                     val currentBottom = currentTop + thumbHeight()
                     dragging = true
+                    lastTargetIndex = -1
                     dragOffset = if (event.y in currentTop..currentBottom) {
                         event.y - currentTop - thumbHeight() / 2f
                     } else {
@@ -486,6 +489,7 @@ class MainActivity : Activity() {
             18, white
         ))
         val allVisibleSongs = visibleSongSource()
+        visibleSongsCache = allVisibleSongs
         val page = allVisibleSongs.take(displayedSongCount)
         this.hasMoreSongs = allVisibleSongs.size > displayedSongCount
         if (currentPlaylist != "همه آهنگ‌ها" && searchQuery.isEmpty()) {
@@ -568,16 +572,16 @@ class MainActivity : Activity() {
     private fun loadNextSongsPage() {
         if (!hasMoreSongs || isLoadingNextPage) return
         isLoadingNextPage = true
-        val nextPage = visibleSongSource().drop(displayedSongCount).take(50).toList()
+        val nextPage = visibleSongsCache.drop(displayedSongCount).take(50)
         val batch = nextPage
-        hasMoreSongs = visibleSongSource().size > displayedSongCount + batch.size
+        hasMoreSongs = visibleSongsCache.size > displayedSongCount + batch.size
         displayedSongCount += batch.size
 
         // Add rows in small UI batches instead of rebuilding the whole list.
         // This keeps scrolling responsive while the next page is appended.
         var index = 0
         fun appendChunk() {
-            val end = minOf(index + 10, batch.size)
+            val end = minOf(index + 20, batch.size)
             while (index < end) {
                 addSongRow(batch[index])
                 index++
@@ -597,8 +601,7 @@ class MainActivity : Activity() {
     }
 
     private fun scrollToSongIndex(index: Int) {
-        val visibleSongs = visibleSongSource()
-        val totalSongs = visibleSongs.size
+        val totalSongs = visibleSongsCache.size
         if (totalSongs == 0) return
         val target = index.coerceIn(0, totalSongs - 1)
 
