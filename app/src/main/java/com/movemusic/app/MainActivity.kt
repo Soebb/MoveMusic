@@ -67,6 +67,8 @@ class MainActivity : Activity() {
     private var miniPlayerHost: LinearLayout? = null
     private var songScrollView: ScrollView? = null
     private var fastScrollOverlay: FastScrollOverlay? = null
+    private var songRowsStartIndex = 0
+    private var pendingFastScrollIndex = -1
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
 
@@ -322,18 +324,27 @@ class MainActivity : Activity() {
             return (contentHeight - scrollView.height).coerceAtLeast(0)
         }
 
+        private fun totalSongCount(): Int {
+            val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+                else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+            return songs.count { playlistIds == null || it.id in playlistIds }
+        }
+
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
-            val contentHeight = (scrollView.getChildAt(0)?.height ?: 0).coerceAtLeast(1)
-            return (height.toFloat() * scrollView.height / contentHeight)
+            val estimatedContentHeight = (totalSongCount() * 72f * density)
+                .coerceAtLeast(height.toFloat())
+            return (height.toFloat() * height / estimatedContentHeight)
                 .coerceAtLeast(minimumThumb)
                 .coerceAtMost(height.toFloat())
         }
 
         private fun thumbTop(): Float {
             val available = (height - thumbHeight()).coerceAtLeast(0f)
-            val range = scrollRange()
-            return if (range == 0) 0f else available * scrollView.scrollY / range
+            val total = totalSongCount()
+            if (total <= 1) return 0f
+            val firstVisibleIndex = scrollView.scrollY / (72f * density)
+            return available * (firstVisibleIndex / (total - 1f)).coerceIn(0f, 1f)
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -349,12 +360,17 @@ class MainActivity : Activity() {
         }
 
         private fun moveTo(y: Float) {
-            val range = scrollRange()
-            if (range <= 0) return
             val available = (height - thumbHeight()).coerceAtLeast(1f)
             val top = (y - dragOffset - thumbHeight() / 2f)
                 .coerceIn(0f, available)
-            scrollView.scrollTo(0, (top / available * range).toInt())
+            val fraction = (top / available).coerceIn(0f, 1f)
+            val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+                else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+            val totalSongs = songs.count { playlistIds == null || it.id in playlistIds }
+            if (totalSongs > 0) {
+                val targetIndex = (fraction * (totalSongs - 1)).toInt()
+                scrollToSongIndex(targetIndex)
+            }
             invalidate()
         }
 
@@ -423,6 +439,7 @@ class MainActivity : Activity() {
             refreshBody()
             toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
         })
+        songRowsStartIndex = body.childCount
         page.forEach { song -> addSongRow(song) }
         this.hasMoreSongs = hasMoreSongs
     }
@@ -501,9 +518,35 @@ class MainActivity : Activity() {
                 uiHandler.post { appendChunk() }
             } else {
                 isLoadingNextPage = false
+                if (pendingFastScrollIndex >= 0) {
+                    val target = pendingFastScrollIndex
+                    pendingFastScrollIndex = -1
+                    scrollToSongIndex(target)
+                }
             }
         }
         appendChunk()
+    }
+
+    private fun scrollToSongIndex(index: Int) {
+        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+        val totalSongs = songs.count { playlistIds == null || it.id in playlistIds }
+        if (totalSongs == 0) return
+        val target = index.coerceIn(0, totalSongs - 1)
+
+        if (target >= displayedSongCount && hasMoreSongs) {
+            pendingFastScrollIndex = target
+            if (!isLoadingNextPage) loadNextSongsPage()
+            return
+        }
+        if (isLoadingNextPage) {
+            pendingFastScrollIndex = target
+            return
+        }
+
+        val row = body.getChildAt(songRowsStartIndex + target) ?: return
+        songScrollView?.scrollTo(0, row.top)
     }
 
     private fun moveSong(song: Song) {
