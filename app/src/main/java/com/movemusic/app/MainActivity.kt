@@ -69,6 +69,9 @@ class MainActivity : Activity() {
     private var fastScrollOverlay: FastScrollOverlay? = null
     private var songRowsStartIndex = 0
     private var pendingFastScrollIndex = -1
+    private var searchQuery = ""
+    private var searchField: EditText? = null
+    private var searchContainer: LinearLayout? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
 
@@ -247,7 +250,42 @@ class MainActivity : Activity() {
         nav.addView(button("همه آهنگ‌ها") { currentPlaylist = "همه آهنگ‌ها"; displayedSongCount = 50; refreshBody() })
         nav.addView(button("پلی‌لیست‌ها") { showPlaylistChooser() })
         nav.addView(button("+ جدید") { createPlaylist() })
+        nav.addView(button("⌕ جست‌وجو") { toggleSearch() })
         root.addView(nav)
+        searchContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(0, 6, 0, 6)
+        }
+        searchField = EditText(this).apply {
+            hint = "نام آهنگ یا خواننده…"
+            textSize = 14f
+            singleLine = true
+            setTextColor(white)
+            setHintTextColor(muted)
+            setCompoundDrawablePadding(8)
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    searchQuery = s?.toString()?.trim().orEmpty()
+                    displayedSongCount = 50
+                    pendingFastScrollIndex = -1
+                    songScrollView?.scrollTo(0, 0)
+                    if (::body.isInitialized) refreshBody()
+                }
+                override fun afterTextChanged(s: android.text.Editable?) {}
+            })
+        }
+        searchContainer?.addView(searchField, LinearLayout.LayoutParams(0, -2, 1f))
+        searchContainer?.addView(button("✕") {
+            searchField?.text?.clear()
+            searchContainer?.visibility = View.GONE
+            searchField?.clearFocus()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(searchField?.windowToken, 0)
+        })
+        root.addView(searchContainer)
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -291,6 +329,30 @@ class MainActivity : Activity() {
         refreshBody()
     }
 
+    private fun toggleSearch() {
+        val container = searchContainer ?: return
+        if (container.visibility == View.VISIBLE) {
+            searchField?.requestFocus()
+        } else {
+            container.visibility = View.VISIBLE
+            searchField?.requestFocus()
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(searchField, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun visibleSongSource(): List<Song> {
+        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+        val source = songs.asSequence().filter { playlistIds == null || it.id in playlistIds }
+        val query = searchQuery.trim()
+        return if (query.isEmpty()) source.toList()
+        else source.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                it.artist.contains(query, ignoreCase = true)
+        }.toList()
+    }
+
     private inner class FastScrollOverlay(
         private val scrollView: ScrollView
     ) : View(this@MainActivity) {
@@ -325,9 +387,7 @@ class MainActivity : Activity() {
         }
 
         private fun totalSongCount(): Int {
-            val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
-                else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-            return songs.count { playlistIds == null || it.id in playlistIds }
+            return visibleSongSource().size
         }
 
         private fun thumbHeight(): Float {
@@ -364,9 +424,7 @@ class MainActivity : Activity() {
             val top = (y - dragOffset - thumbHeight() / 2f)
                 .coerceIn(0f, available)
             val fraction = (top / available).coerceIn(0f, 1f)
-            val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
-                else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-            val totalSongs = songs.count { playlistIds == null || it.id in playlistIds }
+            val totalSongs = visibleSongSource().size
             if (totalSongs > 0) {
                 val targetIndex = (fraction * (totalSongs - 1)).toInt()
                 scrollToSongIndex(targetIndex)
@@ -409,19 +467,14 @@ class MainActivity : Activity() {
 
     private fun refreshBody() {
         body.removeAllViews()
-        body.addView(label(currentPlaylist, 18, white))
-        // Only collect the current page (plus one item to detect whether
-        // another page exists). Avoid filtering the entire music library on
-        // every return from the player screen.
-        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
-            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-        val pageWithExtra = songs.asSequence()
-            .filter { playlistIds == null || it.id in playlistIds }
-            .take(displayedSongCount + 1)
-            .toList()
-        val hasMoreSongs = pageWithExtra.size > displayedSongCount
-        val page = pageWithExtra.take(displayedSongCount)
-        if (currentPlaylist != "همه آهنگ‌ها") {
+        body.addView(label(
+            if (searchQuery.isEmpty()) currentPlaylist else "نتایج جست‌وجو",
+            18, white
+        ))
+        val allVisibleSongs = visibleSongSource()
+        val page = allVisibleSongs.take(displayedSongCount)
+        this.hasMoreSongs = allVisibleSongs.size > displayedSongCount
+        if (currentPlaylist != "همه آهنگ‌ها" && searchQuery.isEmpty()) {
             body.addView(button("افزودن همه آهنگ‌ها به این پلی‌لیست") {
                 val target = playlists[currentPlaylist] ?: return@button
                 val existingIds = target.toHashSet()
@@ -433,15 +486,22 @@ class MainActivity : Activity() {
                       else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
             })
         }
-        if (page.isEmpty()) body.addView(label("اینجا هنوز آهنگی نیست.", 13, muted))
-        body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
-            shuffleEnabled = !shuffleEnabled
-            refreshBody()
-            toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
-        })
+        if (page.isEmpty()) {
+            body.addView(label(
+                if (searchQuery.isEmpty()) "اینجا هنوز آهنگی نیست." else "نتیجه‌ای پیدا نشد.",
+                13, muted
+            ))
+        }
+        if (searchQuery.isEmpty()) {
+            body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
+                shuffleEnabled = !shuffleEnabled
+                refreshBody()
+                toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
+            })
+        }
         songRowsStartIndex = body.childCount
         page.forEach { song -> addSongRow(song) }
-        this.hasMoreSongs = hasMoreSongs
+        fastScrollOverlay?.invalidate()
     }
 
     private fun addSongRow(song: Song) {
@@ -494,15 +554,9 @@ class MainActivity : Activity() {
     private fun loadNextSongsPage() {
         if (!hasMoreSongs || isLoadingNextPage) return
         isLoadingNextPage = true
-        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
-            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-        val nextPage = songs.asSequence()
-            .filter { playlistIds == null || it.id in playlistIds }
-            .drop(displayedSongCount)
-            .take(51)
-            .toList()
-        val batch = nextPage.take(50)
-        hasMoreSongs = nextPage.size > 50
+        val nextPage = visibleSongSource().drop(displayedSongCount).take(50).toList()
+        val batch = nextPage
+        hasMoreSongs = visibleSongSource().size > displayedSongCount + batch.size
         displayedSongCount += batch.size
 
         // Add rows in small UI batches instead of rebuilding the whole list.
@@ -529,9 +583,8 @@ class MainActivity : Activity() {
     }
 
     private fun scrollToSongIndex(index: Int) {
-        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
-            else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-        val totalSongs = songs.count { playlistIds == null || it.id in playlistIds }
+        val visibleSongs = visibleSongSource()
+        val totalSongs = visibleSongs.size
         if (totalSongs == 0) return
         val target = index.coerceIn(0, totalSongs - 1)
 
