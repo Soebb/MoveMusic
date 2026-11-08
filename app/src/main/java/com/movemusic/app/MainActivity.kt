@@ -77,7 +77,7 @@ class MainActivity : Activity() {
             try {
                 val controller = future.get()
                 if (isFinishing || isDestroyed) {
-                    controller.release()
+                    MediaController.releaseFuture(future)
                     return@addListener
                 }
                 player = controller
@@ -774,7 +774,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
         pendingSong = null
-        player?.release()
+        controllerFuture?.let { MediaController.releaseFuture(it) }
         player = null
         controllerFuture = null
         super.onDestroy()
