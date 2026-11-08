@@ -744,63 +744,16 @@ class MainActivity : Activity() {
 
     private fun loadSongArtwork(song: Song, target: ImageView) {
         val requestToken = ++artworkRequestToken
-        val key = artworkKey(song)
-        target.tag = requestToken
-        artworkCache.get(key)?.let { cached ->
-            target.setImageBitmap(cached)
-            target.scaleType = ImageView.ScaleType.CENTER_CROP
-            return
-        }
+        target.setImageResource(android.R.drawable.ic_media_play)
+        target.scaleType = ImageView.ScaleType.CENTER
+        val targetSize = (resources.displayMetrics.widthPixels * 0.78f).toInt().coerceAtLeast(256)
 
-        // Cancel obsolete work before submitting the newest request. This is
-        // important when users skip through tracks quickly.
-        artworkTask?.cancel(true)
-        val requestedSize = (resources.displayMetrics.widthPixels * 0.78f).toInt().coerceAtLeast(1)
-        artworkTask = artworkExecutor.submit {
-            var bitmap: Bitmap? = null
-            try {
-                val diskFile = File(artworkCacheDir, "$key.img")
-                if (diskFile.isFile && diskFile.length() > 0L) {
-                    bitmap = decodeArtwork(diskFile.readBytes(), requestedSize)
-                }
-
-                if (bitmap == null) {
-                    var bytes = readArtworkBytes(song)
-                    bitmap = bytes?.takeIf { it.isNotEmpty() }?.let { decodeArtwork(it, requestedSize) }
-                    if (bitmap == null) {
-                        // If MediaStore returned an unreadable image, try the
-                        // original file's embedded artwork before giving up.
-                        bytes = readEmbeddedArtworkBytes(song)
-                        bitmap = bytes?.takeIf { it.isNotEmpty() }?.let { decodeArtwork(it, requestedSize) }
-                    }
-                    if (bitmap != null && bytes != null) {
-                        val tempFile = File(artworkCacheDir, "$key.tmp")
-                            try {
-                                FileOutputStream(tempFile).use { it.write(bytes) }
-                                val finalFile = File(artworkCacheDir, "$key.img")
-                                if (!tempFile.renameTo(finalFile)) {
-                                    tempFile.copyTo(finalFile, overwrite = true)
-                                    tempFile.delete()
-                                }
-                            } catch (_: Exception) {
-                                tempFile.delete()
-                            }
-                        }
-                    }
-                }
-
-                if (Thread.currentThread().isInterrupted) return@submit
-                bitmap?.let { artworkCache.put(key, it) }
-            } catch (_: Exception) {
-                bitmap = null
-            }
-
-            val result = bitmap
+        artworkLoader.load(song, targetSize) { bitmap ->
             runOnUiThread {
-                if (!isFinishing && !isDestroyed && target.tag == requestToken &&
+                if (!isFinishing && !isDestroyed && playerScreenVisible &&
                     artworkRequestToken == requestToken && currentSong?.id == song.id) {
-                    if (result != null) {
-                        target.setImageBitmap(result)
+                    if (bitmap != null) {
+                        target.setImageBitmap(bitmap)
                         target.scaleType = ImageView.ScaleType.CENTER_CROP
                     } else {
                         target.setImageResource(android.R.drawable.ic_media_play)
@@ -810,6 +763,7 @@ class MainActivity : Activity() {
             }
         }
     }
+
     private fun playerControl(iconRes: Int, size: Int, action: () -> Unit): ImageButton =
         ImageButton(this).apply {
             setImageResource(iconRes)
@@ -948,8 +902,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
         artworkTask?.cancel(true)
-        artworkExecutor.shutdownNow()
-        artworkCache.evictAll()
+        if (artworkLoaderDelegate.isInitialized()) artworkLoader.close()
         pendingSong = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         player = null
