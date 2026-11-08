@@ -27,6 +27,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import coil3.load
 
 data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri)
 
@@ -61,9 +62,6 @@ class MainActivity : Activity() {
     private var songScrollView: ScrollView? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
-    private val artworkLoaderDelegate = lazy { ArtworkLoader(this) }
-    private val artworkLoader by artworkLoaderDelegate
-    private var artworkRequestToken = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -299,22 +297,6 @@ class MainActivity : Activity() {
         })
         page.forEach { song -> addSongRow(song) }
         this.hasMoreSongs = hasMoreSongs
-        scheduleArtworkPrefetch(page)
-    }
-
-    /**
-     * Warm a tiny batch after the list settles. This keeps initial rendering
-     * and scrolling responsive while making the first few player screens ready.
-     */
-    private fun scheduleArtworkPrefetch(items: List<Song>) {
-        if (items.isEmpty()) return
-        val candidates = items.take(4)
-        uiHandler.postDelayed({
-            if (isFinishing || isDestroyed || playerScreenVisible) return@postDelayed
-            val targetSize = (resources.displayMetrics.widthPixels * 0.78f)
-                .toInt().coerceAtLeast(256)
-            candidates.forEach { artworkLoader.prefetch(it, targetSize) }
-        }, 350L)
     }
 
     private fun addSongRow(song: Song) {
@@ -377,7 +359,6 @@ class MainActivity : Activity() {
         val batch = nextPage.take(50)
         hasMoreSongs = nextPage.size > 50
         displayedSongCount += batch.size
-        scheduleArtworkPrefetch(batch)
 
         // Add rows in small UI batches instead of rebuilding the whole list.
         // This keeps scrolling responsive while the next page is appended.
@@ -689,24 +670,14 @@ class MainActivity : Activity() {
         }
 
     private fun loadSongArtwork(song: Song, target: ImageView) {
-        val requestToken = ++artworkRequestToken
-        target.setImageResource(android.R.drawable.ic_media_play)
-        target.scaleType = ImageView.ScaleType.CENTER
-        val targetSize = (resources.displayMetrics.widthPixels * 0.78f).toInt().coerceAtLeast(256)
-
-        artworkLoader.load(song, targetSize) { bitmap ->
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed && playerScreenVisible &&
-                    artworkRequestToken == requestToken && currentSong?.id == song.id) {
-                    if (bitmap != null) {
-                        target.setImageBitmap(bitmap)
-                        target.scaleType = ImageView.ScaleType.CENTER_CROP
-                    } else {
-                        target.setImageResource(android.R.drawable.ic_media_play)
-                        target.scaleType = ImageView.ScaleType.CENTER
-                    }
-                }
-            }
+        // Match Chocola's MediaStore URI convention and let Coil own image
+        // loading, request lifecycle, decoding and memory caching.
+        val artworkUri = Uri.withAppendedPath(song.uri, "albumart")
+        target.scaleType = ImageView.ScaleType.CENTER_CROP
+        target.load(artworkUri) {
+            placeholder(android.R.drawable.ic_media_play)
+            error(android.R.drawable.ic_media_play)
+            crossfade(false)
         }
     }
 
@@ -847,7 +818,6 @@ class MainActivity : Activity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
-        if (artworkLoaderDelegate.isInitialized()) artworkLoader.close()
         pendingSong = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         player = null
