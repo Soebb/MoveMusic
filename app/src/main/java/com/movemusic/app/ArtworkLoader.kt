@@ -26,7 +26,11 @@ internal class ArtworkLoader(context: Context) {
     private val executor = ThreadPoolExecutor(
         2, 2, 0L, TimeUnit.MILLISECONDS, LinkedBlockingDeque<Runnable>()
     )
-    private inner class ArtworkTask(val key: String, val work: () -> Unit) : Runnable {
+    private inner class ArtworkTask(
+        val key: String,
+        val isPrefetch: Boolean,
+        val work: () -> Unit
+    ) : Runnable {
         override fun run() = work()
     }
     private val memoryCache = object : LruCache<String, Bitmap>(
@@ -37,31 +41,51 @@ internal class ArtworkLoader(context: Context) {
     private val pending = ConcurrentHashMap<String, MutableList<(Bitmap?) -> Unit>>()
 
     fun load(song: Song, targetSize: Int, callback: (Bitmap?) -> Unit) {
+        request(song, targetSize, callback, false)
+    }
+
+    /**
+     * Warm the caches for a small number of likely-to-be-opened tracks.
+     * Prefetch tasks are queued behind user-requested artwork and are discarded
+     * when a fresh on-demand request needs the worker queue.
+     */
+    fun prefetch(song: Song, targetSize: Int) {
+        request(song, targetSize, null, true)
+    }
+
+    private fun request(
+        song: Song,
+        targetSize: Int,
+        callback: ((Bitmap?) -> Unit)?,
+        isPrefetch: Boolean
+    ) {
         val key = if (song.albumId > 0) "album_${song.albumId}" else "song_${song.id}"
-        memoryCache.get(key)?.let { callback(it); return }
+        memoryCache.get(key)?.let { callback?.invoke(it); return }
 
         var shouldStart = false
         synchronized(pending) {
             val listeners = pending[key]
             if (listeners != null) {
-                listeners.add(callback)
+                if (callback != null) listeners.add(callback)
             } else {
-                // Remove queued jobs for albums that are no longer displayed.
-                // Already-running decodes are allowed to finish and populate cache.
-                val obsoleteKeys = pending.keys.filter { it != key }
-                obsoleteKeys.forEach { obsoleteKey ->
-                    pending.remove(obsoleteKey)
-                    executor.queue.removeIf { task ->
-                        task is ArtworkTask && task.key == obsoleteKey
-                    }
+                if (!isPrefetch) {
+                    // User-visible artwork always takes precedence over queued
+                    // speculative work. Running jobs finish and warm the cache.
+                    val queuedPrefetchKeys = executor.queue.filter {
+                        it is ArtworkTask && it.isPrefetch
+                    }.map { (it as ArtworkTask).key }.toSet()
+                    executor.queue.removeIf { it is ArtworkTask && it.isPrefetch }
+                    queuedPrefetchKeys.forEach { pending.remove(it) }
                 }
-                pending[key] = mutableListOf(callback)
+                pending[key] = mutableListOf<(Bitmap?) -> Unit>().also {
+                    if (callback != null) it.add(callback)
+                }
                 shouldStart = true
             }
         }
         if (!shouldStart) return
 
-        executor.execute(ArtworkTask(key) {
+        val task = ArtworkTask(key, isPrefetch) {
             val bitmap = try {
                 loadFromDisk(key, targetSize)
                     ?: loadFromMediaStore(song.albumId, targetSize)
@@ -70,11 +94,17 @@ internal class ArtworkLoader(context: Context) {
 
             if (bitmap != null) memoryCache.put(key, bitmap)
             val listeners = synchronized(pending) { pending.remove(key).orEmpty() }
-            // Deliver as soon as decoding finishes; disk persistence must not
-            // delay the visible cover on the main thread.
             listeners.forEach { listener -> try { listener(bitmap) } catch (_: Exception) {} }
             if (bitmap != null) saveToDisk(key, bitmap)
-        })
+        }
+
+        if (isPrefetch) {
+            executor.execute(task)
+        } else {
+            // Put the requested artwork at the front of the waiting queue.
+            if (executor.poolSize < executor.corePoolSize) executor.execute(task)
+            else executor.queue.offerFirst(task)
+        }
     }
 
     private fun loadFromDisk(key: String, targetSize: Int): Bitmap? {
