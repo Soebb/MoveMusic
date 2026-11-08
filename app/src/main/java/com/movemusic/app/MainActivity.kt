@@ -48,6 +48,8 @@ class MainActivity : Activity() {
     private var seekBarTask: Runnable? = null
     private lateinit var body: LinearLayout
     private lateinit var header: TextView
+    private var songScrollView: ScrollView? = null
+    private var isLoadingNextPage = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -159,8 +161,12 @@ class MainActivity : Activity() {
         nav.addView(button("+ جدید") { createPlaylist() })
         root.addView(nav)
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val scroll = ScrollView(this).apply { addView(body) }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(body)
+        }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        songScrollView = scroll
         if (currentSong != null) {
             root.addView(buildMiniPlayerBar(), LinearLayout.LayoutParams(-1, -2))
         }
@@ -249,11 +255,32 @@ class MainActivity : Activity() {
             lp.bottomMargin = 3
             body.addView(row, lp)
         }
+        // Load the next page automatically when the user approaches the
+        // bottom of the currently rendered songs.
         if (hasMoreSongs) {
-            body.addView(button("نمایش ۵۰ آهنگ بعدی") {
-                displayedSongCount += 50
-                refreshBody()
-            })
+            val trigger = View(this).apply {
+                minimumHeight = 1
+                alpha = 0f
+            }
+            body.addView(trigger, LinearLayout.LayoutParams(-1, 1))
+            trigger.post {
+                val scroll = songScrollView ?: return@post
+                if (!trigger.isAttachedToWindow) return@post
+                val location = IntArray(2)
+                trigger.getLocationOnScreen(location)
+                val scrollLocation = IntArray(2)
+                scroll.getLocationOnScreen(scrollLocation)
+                val triggerY = location[1] - scrollLocation[1] + scroll.scrollY
+                val remaining = triggerY - (scroll.scrollY + scroll.height)
+                if (remaining <= scroll.height / 2 && !isLoadingNextPage) {
+                    isLoadingNextPage = true
+                    val previousCount = displayedSongCount
+                    displayedSongCount += 50
+                    refreshBody()
+                    isLoadingNextPage = false
+                    if (displayedSongCount == previousCount) isLoadingNextPage = false
+                }
+            }
         }
     }
 
