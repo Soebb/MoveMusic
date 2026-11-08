@@ -28,7 +28,7 @@ internal class ArtworkLoader(context: Context) {
     private val pending = ConcurrentHashMap<String, MutableList<(Bitmap?) -> Unit>>()
 
     fun load(song: Song, targetSize: Int, callback: (Bitmap?) -> Unit) {
-        val key = if (song.albumId > 0) "album_\${song.albumId}" else "song_\${song.id}"
+        val key = if (song.albumId > 0) "album_${song.albumId}" else "song_${song.id}"
         memoryCache.get(key)?.let { callback(it); return }
 
         var shouldStart = false
