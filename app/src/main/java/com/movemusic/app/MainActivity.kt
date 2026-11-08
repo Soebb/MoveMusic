@@ -12,7 +12,12 @@ import android.media.MediaMetadataRetriever
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.util.LruCache
-import java.util.concurrent.Executors
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -33,7 +38,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 
-data class Song(val id: Long, val title: String, val artist: String, val uri: Uri)
+data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri)
 
 class MainActivity : Activity() {
     private val blue = 0xFF168BFF.toInt()
@@ -66,11 +71,21 @@ class MainActivity : Activity() {
     private var songScrollView: ScrollView? = null
     private var isLoadingNextPage = false
     private var hasMoreSongs = false
-    private val artworkExecutor = Executors.newFixedThreadPool(2)
-    private val artworkCache = object : LruCache<Long, Bitmap>((Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()) {
-        override fun sizeOf(key: Long, value: Bitmap): Int = value.byteCount / 1024
+    // A small bounded worker pool prevents rapid track changes from building
+    // an unbounded queue of slow metadata-extraction jobs.
+    private val artworkExecutor = ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS,
+        LinkedBlockingQueue<Runnable>(2),
+        ThreadPoolExecutor.DiscardOldestPolicy()
+    )
+    private val artworkCache = object : LruCache<String, Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt().coerceAtLeast(1024)
+    ) {
+        override fun sizeOf(key: String, value: Bitmap): Int = (value.byteCount / 1024).coerceAtLeast(1)
     }
+    private val artworkCacheDir by lazy { File(cacheDir, "artwork").apply { mkdirs() } }
     private var artworkRequestToken = 0
+    private var artworkTask: Future<*>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -169,6 +184,7 @@ class MainActivity : Activity() {
                     MediaStore.Audio.Media._ID,
                     MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM_ID,
                     MediaStore.Audio.Media.IS_MUSIC
                 )
                 contentResolver.query(
@@ -181,6 +197,7 @@ class MainActivity : Activity() {
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                     val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                     val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
                         loadedSongs.add(
@@ -188,6 +205,7 @@ class MainActivity : Activity() {
                                 id,
                                 cursor.getString(titleCol) ?: "بدون عنوان",
                                 cursor.getString(artistCol) ?: "هنرمند نامشخص",
+                                cursor.getLong(albumIdCol),
                                 ContentUris.withAppendedId(collection, id)
                             )
                         )
@@ -675,38 +693,112 @@ class MainActivity : Activity() {
             setOnClickListener { action() }
         }
 
+    private fun artworkKey(song: Song): String =
+        if (song.albumId > 0L) "album_${song.albumId}" else "song_${song.id}"
+
+    private fun decodeArtwork(bytes: ByteArray, targetSize: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        // Decode close to the rendered size; CENTER_CROP handles the final fit.
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= targetSize) {
+            sample *= 2
+        }
+        return BitmapFactory.decodeByteArray(
+            bytes, 0, bytes.size,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+        )
+    }
+
+    private fun readArtworkBytes(song: Song): ByteArray? {
+        // Android's MediaStore album-art provider is much cheaper than opening
+        // and parsing the whole audio file with MediaMetadataRetriever.
+        if (song.albumId > 0L) {
+            val albumArtUri = Uri.parse("content://media/external/audio/albumart/${song.albumId}")
+            try {
+                contentResolver.openInputStream(albumArtUri)?.use { return it.readBytes() }
+            } catch (_: Exception) {
+                // Some devices do not expose album art through this provider.
+            }
+        }
+
+        // Fallback for files whose artwork is embedded but not indexed by MediaStore.
+        var retriever: MediaMetadataRetriever? = null
+        return try {
+            retriever = MediaMetadataRetriever()
+            retriever.setDataSource(this, song.uri)
+            retriever.embeddedPicture
+        } catch (_: Exception) {
+            null
+        } finally {
+            try { retriever?.release() } catch (_: Exception) {}
+        }
+    }
+
     private fun loadSongArtwork(song: Song, target: ImageView) {
         val requestToken = ++artworkRequestToken
-        artworkCache.get(song.id)?.let { cached ->
+        val key = artworkKey(song)
+        target.tag = requestToken
+        artworkCache.get(key)?.let { cached ->
             target.setImageBitmap(cached)
             target.scaleType = ImageView.ScaleType.CENTER_CROP
             return
         }
-        artworkExecutor.execute {
+
+        // Cancel obsolete work before submitting the newest request. This is
+        // important when users skip through tracks quickly.
+        artworkTask?.cancel(true)
+        val requestedSize = (resources.displayMetrics.widthPixels * 0.78f).toInt().coerceAtLeast(1)
+        artworkTask = artworkExecutor.submit {
             var bitmap: Bitmap? = null
-            var retriever: MediaMetadataRetriever? = null
             try {
-                retriever = MediaMetadataRetriever()
-                retriever.setDataSource(this, song.uri)
-                val bytes = retriever.embeddedPicture
-                if (bytes != null) {
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                    val targetSize = (resources.displayMetrics.widthPixels * 0.78f).toInt()
-                    var sample = 1
-                    while (bounds.outWidth / (sample * 2) >= targetSize && bounds.outHeight / (sample * 2) >= targetSize) sample *= 2
-                    bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-                    bitmap?.let { artworkCache.put(song.id, it) }
+                val diskFile = File(artworkCacheDir, "$key.img")
+                if (diskFile.isFile && diskFile.length() > 0L) {
+                    bitmap = decodeArtwork(diskFile.readBytes(), requestedSize)
                 }
+
+                if (bitmap == null) {
+                    val bytes = readArtworkBytes(song)
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        bitmap = decodeArtwork(bytes, requestedSize)
+                        if (bitmap != null) {
+                            val tempFile = File(artworkCacheDir, "$key.tmp")
+                            try {
+                                FileOutputStream(tempFile).use { it.write(bytes) }
+                                val finalFile = File(artworkCacheDir, "$key.img")
+                                if (!tempFile.renameTo(finalFile)) {
+                                    tempFile.copyTo(finalFile, overwrite = true)
+                                    tempFile.delete()
+                                }
+                            } catch (_: Exception) {
+                                tempFile.delete()
+                            }
+                        }
+                    }
+                }
+
+                if (Thread.currentThread().isInterrupted) return@submit
+                bitmap?.let { artworkCache.put(key, it) }
             } catch (_: Exception) {
-            } finally {
-                try { retriever?.release() } catch (_: Exception) {}
+                bitmap = null
             }
+
             val result = bitmap
             runOnUiThread {
-                if (!isFinishing && playerScreenVisible && artworkRequestToken == requestToken && currentSong?.id == song.id) {
-                    if (result != null) { target.setImageBitmap(result); target.scaleType = ImageView.ScaleType.CENTER_CROP }
-                    else { target.setImageResource(android.R.drawable.ic_media_play); target.scaleType = ImageView.ScaleType.CENTER }
+                if (!isFinishing && !isDestroyed && target.tag == requestToken &&
+                    artworkRequestToken == requestToken && currentSong?.id == song.id) {
+                    if (result != null) {
+                        target.setImageBitmap(result)
+                        target.scaleType = ImageView.ScaleType.CENTER_CROP
+                    } else {
+                        target.setImageResource(android.R.drawable.ic_media_play)
+                        target.scaleType = ImageView.ScaleType.CENTER
+                    }
                 }
             }
         }
@@ -848,6 +940,7 @@ class MainActivity : Activity() {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        artworkTask?.cancel(true)
         artworkExecutor.shutdownNow()
         artworkCache.evictAll()
         pendingSong = null
