@@ -305,7 +305,10 @@ class MainActivity : Activity() {
         playbackQueue = if (currentPlaylist == "همه آهنگ‌ها") {
             songs.toList()
         } else {
-            songs.filter { it.id in (playlists[currentPlaylist] ?: mutableListOf()) }
+            // Use a hash set for membership checks. List.contains() here made
+            // playlist startup increasingly slow as both library and playlist grew.
+            val playlistIds = (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+            songs.filter { it.id in playlistIds }
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         currentSong = song
