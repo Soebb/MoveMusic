@@ -309,10 +309,11 @@ class MainActivity : ComponentActivity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
-            // Reserve the scrollbar width plus a 4dp visual gap.
+            // Keep the list content edge 5dp away from the visible scrollbar stroke.
+            // The stroke is drawn 7dp from the overlay's right edge with a 2dp half-width.
             setPadding(
                 paddingLeft, paddingTop,
-                (39 * resources.displayMetrics.density).toInt(), paddingBottom
+                (14 * resources.displayMetrics.density).toInt(), paddingBottom
             )
             clipToPadding = false
         }
