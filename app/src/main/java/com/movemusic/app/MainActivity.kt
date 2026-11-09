@@ -296,7 +296,7 @@ class MainActivity : Activity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
-            setPadding(paddingLeft, paddingTop, (56 * resources.displayMetrics.density).toInt(), paddingBottom)
+            setPadding(paddingLeft, paddingTop, (36 * resources.displayMetrics.density).toInt(), paddingBottom)
             clipToPadding = false
         }
         songAdapter = SongAdapter()
@@ -304,7 +304,7 @@ class MainActivity : Activity() {
         listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
         val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
         listContainer.addView(fastScroller, FrameLayout.LayoutParams(
-            (48 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+            (32 * resources.displayMetrics.density).toInt(), -1, Gravity.END
         ))
         root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songRecyclerView = recycler
@@ -319,7 +319,6 @@ class MainActivity : Activity() {
         else miniHost.visibility = View.GONE
         root.addView(miniHost, LinearLayout.LayoutParams(-1, -2))
         miniPlayerHost = miniHost
-        root.addView(label("برای انتقال، آهنگ را انتخاب کن و «انتقال به…» را بزن.", 10, muted))
         homeRoot = root
         setContentView(root)
         refreshBody()
@@ -526,19 +525,43 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
         if (currentPlaylist != "همه آهنگ‌ها") {
-            actions.addView(button("انتقال") { moveSong(song) })
-            actions.addView(button("حذف") {
+            actions.addView(songActionButton("انتقال") { moveSong(song) })
+            actions.addView(songActionButton("حذف") {
                 playlists[currentPlaylist]?.remove(song.id); savePlaylists(); refreshBody()
             })
         } else {
-            actions.addView(button("+ لیست") { addSong(song) })
-            actions.addView(button("حذف") { confirmDeleteSong(song) })
+            actions.addView(songActionButton("+ لیست") { addSong(song) })
+            actions.addView(songActionButton("حذف") { confirmDeleteSong(song) })
         }
         row.addView(actions)
         row.isClickable = true
         row.isFocusable = true
         row.setOnClickListener { play(song) }
         return row
+    }
+
+    private fun songActionButton(text: String, action: () -> Unit) = TextView(this).apply {
+        this.text = text
+        textSize = 12f
+        setTextColor(white)
+        gravity = Gravity.CENTER
+        minHeight = (36 * resources.displayMetrics.density).toInt()
+        minWidth = 0
+        setPadding(
+            (11 * resources.displayMetrics.density).toInt(),
+            (7 * resources.displayMetrics.density).toInt(),
+            (11 * resources.displayMetrics.density).toInt(),
+            (7 * resources.displayMetrics.density).toInt()
+        )
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(blue)
+            cornerRadius = 7f * resources.displayMetrics.density
+        }
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply {
+            marginStart = (2 * resources.displayMetrics.density).toInt()
+            marginEnd = (2 * resources.displayMetrics.density).toInt()
+        }
+        setOnClickListener { action() }
     }
 
     private fun moveSong(song: Song) {
