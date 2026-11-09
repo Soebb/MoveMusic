@@ -317,7 +317,7 @@ class MainActivity : ComponentActivity() {
         listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
         val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
         listContainer.addView(fastScroller, FrameLayout.LayoutParams(
-            (23 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+            (30 * resources.displayMetrics.density).toInt(), -1, Gravity.END
         ))
         root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songRecyclerView = recycler
@@ -385,6 +385,7 @@ class MainActivity : ComponentActivity() {
         private val hideTask = Runnable { indicatorVisible = false; invalidate() }
         private var dragging = false
         private var indicatorVisible = false
+        // Distance from the finger to the top edge of the thumb.
         private var dragOffset = 0f
         private val trackInset get() = 8f * density
         private val minimumThumb get() = 38f * density
@@ -396,21 +397,33 @@ class MainActivity : ComponentActivity() {
         }
 
         private fun totalCount() = visibleSongsCache.size
+
+        // Use RecyclerView's pixel-based scroll metrics instead of item indexes.
+        // This accounts for partially visible rows and avoids the step-like motion
+        // caused by repeatedly jumping to integer adapter positions.
+        private fun scrollRange(): Int =
+            (recyclerView.computeVerticalScrollRange() -
+                recyclerView.computeVerticalScrollExtent()).coerceAtLeast(0)
+
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
-            val count = totalCount().coerceAtLeast(1)
-            val visible = (recyclerView.height / (56f * density)).toInt().coerceAtLeast(1)
-            return (height.toFloat() * visible / count).coerceAtLeast(minimumThumb).coerceAtMost(height.toFloat())
+            val trackLength = (height - 2f * trackInset).coerceAtLeast(1f)
+            val range = recyclerView.computeVerticalScrollRange().coerceAtLeast(1)
+            val extent = recyclerView.computeVerticalScrollExtent().coerceAtLeast(1)
+            return (trackLength * extent / range)
+                .coerceAtLeast(minimumThumb)
+                .coerceAtMost(trackLength)
         }
-        private fun currentPosition(): Int {
-            val manager = recyclerView.layoutManager as? LinearLayoutManager ?: return 0
-            return manager.findFirstVisibleItemPosition().coerceAtLeast(0)
-        }
+
         private fun thumbTop(): Float {
-            val available = (height - thumbHeight()).coerceAtLeast(0f)
-            val maxIndex = (totalCount() - 1).coerceAtLeast(1)
-            return available * (currentPosition().toFloat() / maxIndex).coerceIn(0f, 1f)
+            val trackLength = (height - 2f * trackInset).coerceAtLeast(0f)
+            val available = (trackLength - thumbHeight()).coerceAtLeast(0f)
+            val range = scrollRange()
+            val fraction = if (range == 0) 0f else
+                (recyclerView.computeVerticalScrollOffset().toFloat() / range).coerceIn(0f, 1f)
+            return trackInset + available * fraction
         }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (!indicatorVisible || totalCount() <= 0 || height <= 0) return
@@ -422,12 +435,16 @@ class MainActivity : ComponentActivity() {
             val thumbTop = thumbTop().coerceIn(top, (bottom - thumb).coerceAtLeast(top))
             canvas.drawLine(x, thumbTop, x, thumbTop + thumb, thumbPaint)
         }
+
         private fun moveTo(y: Float) {
-            val available = (height - thumbHeight()).coerceAtLeast(1f)
-            val top = (y - dragOffset - thumbHeight() / 2f).coerceIn(0f, available)
-            val fraction = (top / available).coerceIn(0f, 1f)
-            val count = totalCount()
-            if (count > 0) recyclerView.scrollToPosition((fraction * (count - 1)).toInt())
+            val thumb = thumbHeight()
+            val trackLength = (height - 2f * trackInset).coerceAtLeast(0f)
+            val available = (trackLength - thumb).coerceAtLeast(1f)
+            val top = (y - dragOffset).coerceIn(trackInset, trackInset + available)
+            val fraction = ((top - trackInset) / available).coerceIn(0f, 1f)
+            val targetOffset = (fraction * scrollRange()).toInt()
+            val currentOffset = recyclerView.computeVerticalScrollOffset()
+            recyclerView.scrollBy(0, targetOffset - currentOffset)
             invalidate()
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -441,7 +458,7 @@ class MainActivity : ComponentActivity() {
                     val top = thumbTop()
                     val bottom = top + thumbHeight()
                     dragging = true
-                    dragOffset = if (event.y in top..bottom) event.y - top - thumbHeight() / 2f else 0f
+                    dragOffset = if (event.y in top..bottom) event.y - top else thumbHeight() / 2f
                     moveTo(event.y)
                     parent?.requestDisallowInterceptTouchEvent(true)
                     invalidate()
