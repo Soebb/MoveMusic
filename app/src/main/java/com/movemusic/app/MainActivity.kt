@@ -608,9 +608,6 @@ class MainActivity : Activity() {
         val selectedIndex = queueSnapshot.indexOfFirst { it.id == song.id }
             .takeIf { it >= 0 } ?: 0
 
-        // Publish the complete queue to Media3 immediately. Android's
-        // MediaSession uses the available previous/next items to expose the
-        // three standard lock-screen controls: previous, play/pause, next.
         fun mediaItem(queuedSong: Song): MediaItem {
             val metadata = MediaMetadata.Builder()
                 .setTitle(queuedSong.title)
@@ -623,16 +620,55 @@ class MainActivity : Activity() {
                 .build()
         }
 
+        // Start playback with only the selected track and its immediate
+        // neighbours. This exposes previous/next to MediaSession straight
+        // away without building the entire library on the UI thread.
+        val firstIndex = (selectedIndex - 1).coerceAtLeast(0)
+        val lastIndex = (selectedIndex + 1).coerceAtMost(queueSnapshot.lastIndex)
+        val initialItems = (firstIndex..lastIndex).map { mediaItem(queueSnapshot[it]) }
+        val initialCurrentIndex = selectedIndex - firstIndex
+
         try {
-            val mediaItems = queueSnapshot.map(::mediaItem)
             if (requestToken != playbackRequestToken || player !== controller) return
-            controller.setMediaItems(mediaItems, selectedIndex, 0L)
+            controller.setMediaItems(initialItems, initialCurrentIndex, 0L)
             controller.prepare()
             controller.play()
             updatePlayerControls()
         } catch (_: Exception) {
             toast("باز کردن فایل موسیقی ممکن نشد.")
+            return
         }
+
+        // Build the remaining queue off the main thread. Insert it around
+        // the currently playing item so playback position and lock-screen
+        // controls remain intact.
+        if (firstIndex == 0 && lastIndex == queueSnapshot.lastIndex) return
+        Thread {
+            try {
+                val previousItems = (0 until firstIndex)
+                    .map { mediaItem(queueSnapshot[it]) }
+                val nextItems = ((lastIndex + 1)..queueSnapshot.lastIndex)
+                    .map { mediaItem(queueSnapshot[it]) }
+
+                runOnUiThread {
+                    if (requestToken != playbackRequestToken || player !== controller ||
+                        controller.currentMediaItem?.mediaId != song.id.toString()) return@runOnUiThread
+                    try {
+                        if (previousItems.isNotEmpty()) {
+                            controller.addMediaItems(0, previousItems)
+                        }
+                        if (nextItems.isNotEmpty()) {
+                            controller.addMediaItems(controller.currentMediaItemIndex + 1, nextItems)
+                        }
+                    } catch (_: Exception) {
+                        // The selected track is already playing; queue
+                        // completion must not interrupt it.
+                    }
+                }
+            } catch (_: Exception) {
+                // Keep current playback running if queue preparation fails.
+            }
+        }.start()
     }
 
     private fun showPlayerScreen() {
