@@ -309,7 +309,11 @@ class MainActivity : ComponentActivity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
-            setPadding(paddingLeft, paddingTop, (7 * resources.displayMetrics.density).toInt(), paddingBottom)
+            // Reserve the scrollbar width plus a 4dp visual gap.
+            setPadding(
+                paddingLeft, paddingTop,
+                (39 * resources.displayMetrics.density).toInt(), paddingBottom
+            )
             clipToPadding = false
         }
         songAdapter = SongAdapter()
@@ -317,7 +321,7 @@ class MainActivity : ComponentActivity() {
         listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
         val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
         listContainer.addView(fastScroller, FrameLayout.LayoutParams(
-            (30 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+            (35 * resources.displayMetrics.density).toInt(), -1, Gravity.END
         ))
         root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songRecyclerView = recycler
@@ -385,10 +389,10 @@ class MainActivity : ComponentActivity() {
         private val hideTask = Runnable { indicatorVisible = false; invalidate() }
         private var dragging = false
         private var indicatorVisible = false
-        // Distance from the finger to the top edge of the thumb.
         private var dragOffset = 0f
         private val trackInset get() = 8f * density
         private val minimumThumb get() = 38f * density
+        private val layoutManager get() = recyclerView.layoutManager as? LinearLayoutManager
 
         init {
             isClickable = true
@@ -397,31 +401,27 @@ class MainActivity : ComponentActivity() {
         }
 
         private fun totalCount() = visibleSongsCache.size
-
-        // Use RecyclerView's pixel-based scroll metrics instead of item indexes.
-        // This accounts for partially visible rows and avoids the step-like motion
-        // caused by repeatedly jumping to integer adapter positions.
-        private fun scrollRange(): Int =
-            (recyclerView.computeVerticalScrollRange() -
-                recyclerView.computeVerticalScrollExtent()).coerceAtLeast(0)
+        private fun visibleItemCount(): Int = (layoutManager?.childCount ?: 0).coerceAtLeast(1)
+        private fun maxFirstVisiblePosition(): Int = (totalCount() - visibleItemCount()).coerceAtLeast(0)
 
         private fun thumbHeight(): Float {
             if (height <= 0) return minimumThumb
             val trackLength = (height - 2f * trackInset).coerceAtLeast(1f)
-            val range = recyclerView.computeVerticalScrollRange().coerceAtLeast(1)
-            val extent = recyclerView.computeVerticalScrollExtent().coerceAtLeast(1)
-            return (trackLength * extent / range)
-                .coerceAtLeast(minimumThumb)
-                .coerceAtMost(trackLength)
+            val fraction = (visibleItemCount().toFloat() / totalCount().coerceAtLeast(1)).coerceIn(0f, 1f)
+            return (trackLength * fraction).coerceAtLeast(minimumThumb).coerceAtMost(trackLength)
+        }
+
+        private fun currentScrollFraction(): Float {
+            val maxPosition = maxFirstVisiblePosition()
+            if (maxPosition == 0) return 0f
+            val first = layoutManager?.findFirstVisibleItemPosition() ?: 0
+            return (first.toFloat() / maxPosition).coerceIn(0f, 1f)
         }
 
         private fun thumbTop(): Float {
             val trackLength = (height - 2f * trackInset).coerceAtLeast(0f)
             val available = (trackLength - thumbHeight()).coerceAtLeast(0f)
-            val range = scrollRange()
-            val fraction = if (range == 0) 0f else
-                (recyclerView.computeVerticalScrollOffset().toFloat() / range).coerceIn(0f, 1f)
-            return trackInset + available * fraction
+            return trackInset + available * currentScrollFraction()
         }
 
         override fun onDraw(canvas: Canvas) {
@@ -432,25 +432,31 @@ class MainActivity : ComponentActivity() {
             val bottom = height - trackInset
             canvas.drawLine(x, top, x, bottom, trackPaint)
             val thumb = thumbHeight()
-            val thumbTop = thumbTop().coerceIn(top, (bottom - thumb).coerceAtLeast(top))
-            canvas.drawLine(x, thumbTop, x, thumbTop + thumb, thumbPaint)
+            val topThumb = thumbTop().coerceIn(top, (bottom - thumb).coerceAtLeast(top))
+            canvas.drawLine(x, topThumb, x, topThumb + thumb, thumbPaint)
         }
 
         private fun moveTo(y: Float) {
-            val thumb = thumbHeight()
-            val trackLength = (height - 2f * trackInset).coerceAtLeast(0f)
-            val available = (trackLength - thumb).coerceAtLeast(1f)
+            val manager = layoutManager ?: return
+            val count = totalCount()
+            if (count <= 0) return
+            val trackLength = (height - 2f * trackInset).coerceAtLeast(1f)
+            val available = (trackLength - thumbHeight()).coerceAtLeast(1f)
             val top = (y - dragOffset).coerceIn(trackInset, trackInset + available)
             val fraction = ((top - trackInset) / available).coerceIn(0f, 1f)
-            val targetOffset = (fraction * scrollRange()).toInt()
-            val currentOffset = recyclerView.computeVerticalScrollOffset()
-            recyclerView.scrollBy(0, targetOffset - currentOffset)
+            val maxPosition = maxFirstVisiblePosition()
+            val target = fraction * maxPosition
+            val position = target.toInt().coerceIn(0, count - 1)
+            val fractionWithinItem = target - position
+            val itemHeight = recyclerView.getChildAt(0)?.height?.takeIf { it > 0 } ?: 1
+            val offset = -(fractionWithinItem * itemHeight).toInt()
+            // Seek by adapter position: pixel scroll metrics fluctuate during layout.
+            manager.scrollToPositionWithOffset(position, offset)
             invalidate()
         }
+
         override fun onTouchEvent(event: MotionEvent): Boolean {
-            // Keep the overlay's touch target limited to the scrollbar itself.
-            // The song action buttons can then sit close to it without being covered.
-            if (event.x < width - 12f * density) return false
+            // The list reserves 39dp (35dp bar + 4dp gap), so the full width is safe to touch.
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     uiHandler.removeCallbacks(hideTask)
