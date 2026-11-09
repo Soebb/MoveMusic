@@ -1,7 +1,7 @@
 name: Build and Release MoveMusic APK
 
 on:
-  # Validate completed pull requests without publishing an APK.
+  # Build the installable experimental Release APK for pull requests.
   pull_request:
     branches:
       - main
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build Release APK
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,8 +31,8 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build Debug APK
-        run: gradle assembleDebug
+      - name: Build Release APK
+        run: gradle assembleRelease
 
       - name: Prepare release version
         id: meta
@@ -44,10 +44,9 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MoveMusic-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MoveMusic-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-          retention-days: 30
 
   release:
     name: Publish GitHub Release
@@ -61,7 +60,7 @@ jobs:
       - name: Download built APK
         uses: actions/download-artifact@v4
         with:
-          name: MoveMusic-debug-apk
+          name: MoveMusic-release-apk
           path: release-files
 
       - name: Publish APK release
@@ -70,5 +69,5 @@ jobs:
           tag_name: ${{ needs.build.outputs.release_tag }}
           name: MoveMusic ${{ needs.build.outputs.release_tag }}
           generate_release_notes: true
-          files: release-files/app-debug.apk
+          files: release-files/app-release.apk
           fail_on_unmatched_files: true
