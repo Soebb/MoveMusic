@@ -783,7 +783,7 @@ class MainActivity : ComponentActivity() {
                 // Add the rest of the queue in small UI-thread batches.
                 // A single large addMediaItems() call can block input handling
                 // (including the system Back button) while the first tracks load.
-                val batchSize = 40
+                val batchSize = 10
                 fun addNextBatch(start: Int) {
                     if (requestToken != playbackRequestToken || player !== controller ||
                         controller.currentMediaItem?.mediaId != song.id.toString()) return
@@ -793,7 +793,7 @@ class MainActivity : ComponentActivity() {
                         val insertionIndex = controller.currentMediaItemIndex + 1 +
                             (start)
                         controller.addMediaItems(insertionIndex, nextItems.subList(start, end))
-                        uiHandler.post { addNextBatch(end) }
+                        uiHandler.postDelayed({ addNextBatch(end) }, 40L)
                     } catch (_: Exception) {
                         // Keep current playback running if queue completion fails.
                     }
@@ -808,7 +808,7 @@ class MainActivity : ComponentActivity() {
                         }
                         val start = (endExclusive - batchSize).coerceAtLeast(0)
                         controller.addMediaItems(0, previousItems.subList(start, endExclusive))
-                        uiHandler.post { addPreviousBatch(start) }
+                        uiHandler.postDelayed({ addPreviousBatch(start) }, 40L)
                     } catch (_: Exception) {
                         // Keep current playback running if queue completion fails.
                     }
