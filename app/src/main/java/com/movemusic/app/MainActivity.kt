@@ -604,10 +604,13 @@ class MainActivity : Activity() {
         }
 
         val requestToken = ++playbackRequestToken
-        val queueSnapshot = playbackQueue
+        val queueSnapshot = playbackQueue.ifEmpty { listOf(song) }
         val selectedIndex = queueSnapshot.indexOfFirst { it.id == song.id }
             .takeIf { it >= 0 } ?: 0
 
+        // Publish the complete queue to Media3 immediately. Android's
+        // MediaSession uses the available previous/next items to expose the
+        // three standard lock-screen controls: previous, play/pause, next.
         fun mediaItem(queuedSong: Song): MediaItem {
             val metadata = MediaMetadata.Builder()
                 .setTitle(queuedSong.title)
@@ -620,41 +623,16 @@ class MainActivity : Activity() {
                 .build()
         }
 
-        // Start the selected local file immediately. Never wait for the
-        // potentially large playlist to be converted into Media3 items.
         try {
-            controller.setMediaItem(mediaItem(song))
+            val mediaItems = queueSnapshot.map(::mediaItem)
+            if (requestToken != playbackRequestToken || player !== controller) return
+            controller.setMediaItems(mediaItems, selectedIndex, 0L)
             controller.prepare()
             controller.play()
             updatePlayerControls()
         } catch (_: Exception) {
             toast("باز کردن فایل موسیقی ممکن نشد.")
-            return
         }
-
-        // Populate the rest of the queue in the background while the selected
-        // track is already playing. Inserting before/after the current item
-        // preserves the active playback position.
-        if (queueSnapshot.size <= 1) return
-        Thread {
-            val previousItems = queueSnapshot.subList(0, selectedIndex).map(::mediaItem)
-            val nextItems = queueSnapshot.subList(selectedIndex + 1, queueSnapshot.size).map(::mediaItem)
-            runOnUiThread {
-                if (requestToken != playbackRequestToken || player !== controller ||
-                    controller.currentMediaItem?.mediaId != song.id.toString()) return@runOnUiThread
-                try {
-                    if (previousItems.isNotEmpty()) {
-                        controller.addMediaItems(0, previousItems)
-                    }
-                    if (nextItems.isNotEmpty()) {
-                        controller.addMediaItems(controller.currentMediaItemIndex + 1, nextItems)
-                    }
-                } catch (_: Exception) {
-                    // The current track is already playing; queue enrichment
-                    // must never interrupt it.
-                }
-            }
-        }.start()
     }
 
     private fun showPlayerScreen() {
