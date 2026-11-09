@@ -23,6 +23,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import org.json.JSONArray
@@ -75,8 +77,18 @@ class MainActivity : Activity() {
     private var searchQuery = ""
     private var searchField: EditText? = null
     private var searchContainer: LinearLayout? = null
-    private val deleteRequestCode = 4102
     private var pendingDeletionSong: Song? = null
+    private val deletePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val deletedSong = pendingDeletionSong
+        pendingDeletionSong = null
+        if (result.resultCode == RESULT_OK && deletedSong != null) {
+            onSongDeleted(deletedSong)
+        } else if (result.resultCode != RESULT_OK) {
+            toast("حذف آهنگ لغو شد.")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -296,7 +308,7 @@ class MainActivity : Activity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
-            setPadding(paddingLeft, paddingTop, (36 * resources.displayMetrics.density).toInt(), paddingBottom)
+            setPadding(paddingLeft, paddingTop, (14 * resources.displayMetrics.density).toInt(), paddingBottom)
             clipToPadding = false
         }
         songAdapter = SongAdapter()
@@ -304,7 +316,7 @@ class MainActivity : Activity() {
         listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
         val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
         listContainer.addView(fastScroller, FrameLayout.LayoutParams(
-            (32 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+            (16 * resources.displayMetrics.density).toInt(), -1, Gravity.END
         ))
         root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songRecyclerView = recycler
@@ -418,6 +430,9 @@ class MainActivity : Activity() {
             invalidate()
         }
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            // Keep the overlay's touch target limited to the scrollbar itself.
+            // The song action buttons can then sit close to it without being covered.
+            if (event.x < width - 12f * density) return false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     uiHandler.removeCallbacks(hideTask)
@@ -602,7 +617,9 @@ class MainActivity : Activity() {
             if (Build.VERSION.SDK_INT >= 30) {
                 pendingDeletionSong = song
                 val request = MediaStore.createDeleteRequest(contentResolver, listOf(song.uri))
-                startIntentSenderForResult(request.intentSender, deleteRequestCode, null, 0, 0, 0)
+                deletePermissionLauncher.launch(
+                    IntentSenderRequest.Builder(request.intentSender).build()
+                )
             } else {
                 val deleted = contentResolver.delete(song.uri, null, null)
                 if (deleted > 0) onSongDeleted(song) else toast("حذف آهنگ انجام نشد.")
@@ -610,7 +627,10 @@ class MainActivity : Activity() {
         } catch (e: RecoverableSecurityException) {
             if (Build.VERSION.SDK_INT == 29) {
                 try {
-                    startIntentSenderForResult(e.userAction.actionIntent.intentSender, deleteRequestCode, null, 0, 0, 0)
+                    pendingDeletionSong = song
+                    deletePermissionLauncher.launch(
+                        IntentSenderRequest.Builder(e.userAction.actionIntent.intentSender).build()
+                    )
                 } catch (_: Exception) { toast("درخواست مجوز حذف باز نشد.") }
             } else toast("حذف آهنگ ممکن نشد.")
         } catch (_: Exception) {
@@ -632,17 +652,6 @@ class MainActivity : Activity() {
         } else playbackQueue = playbackQueue.filterNot { it.id == song.id }
         refreshBody()
         toast("آهنگ از گوشی حذف شد.")
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == deleteRequestCode) {
-            val deletedSong = pendingDeletionSong
-            pendingDeletionSong = null
-            if (resultCode == RESULT_OK && deletedSong != null) onSongDeleted(deletedSong)
-            else if (resultCode != RESULT_OK) toast("حذف آهنگ لغو شد.")
-        }
     }
 
     private fun showPlaylistChooser() {
