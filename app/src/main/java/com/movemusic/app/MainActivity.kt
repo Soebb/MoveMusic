@@ -317,7 +317,7 @@ class MainActivity : ComponentActivity() {
         listContainer.addView(recycler, FrameLayout.LayoutParams(-1, -1))
         val fastScroller = FastScrollOverlay(recycler).apply { visibility = View.VISIBLE }
         listContainer.addView(fastScroller, FrameLayout.LayoutParams(
-            (16 * resources.displayMetrics.density).toInt(), -1, Gravity.END
+            (23 * resources.displayMetrics.density).toInt(), -1, Gravity.END
         ))
         root.addView(listContainer, LinearLayout.LayoutParams(-1, 0, 1f))
         songRecyclerView = recycler
