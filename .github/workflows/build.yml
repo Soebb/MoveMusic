@@ -1,7 +1,10 @@
 name: Build and Release MoveMusic APK
 
 on:
-  # Build/release only when explicitly requested after the feature is complete.
+  # Validate completed pull requests without publishing an APK.
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
