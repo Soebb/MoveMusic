@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private var searchField: EditText? = null
     private var searchContainer: LinearLayout? = null
     private val deleteRequestCode = 4102
+    private var pendingDeletionSong: Song? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -576,6 +577,7 @@ class MainActivity : Activity() {
     private fun requestSongDeletion(song: Song) {
         try {
             if (Build.VERSION.SDK_INT >= 30) {
+                pendingDeletionSong = song
                 val request = MediaStore.createDeleteRequest(contentResolver, listOf(song.uri))
                 startIntentSenderForResult(request.intentSender, deleteRequestCode, null, 0, 0, 0)
             } else {
@@ -612,7 +614,12 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == deleteRequestCode && resultCode == RESULT_OK) loadSongsAsync()
+        if (requestCode == deleteRequestCode) {
+            val deletedSong = pendingDeletionSong
+            pendingDeletionSong = null
+            if (resultCode == RESULT_OK && deletedSong != null) onSongDeleted(deletedSong)
+            else if (resultCode != RESULT_OK) toast("حذف آهنگ لغو شد.")
+        }
     }
 
     private fun showPlaylistChooser() {
