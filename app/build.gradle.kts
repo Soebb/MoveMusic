@@ -23,6 +23,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    buildTypes {
+        getByName("release") {
+            // Experimental release signing only. This uses the machine-generated
+            // debug key and is not suitable for stable public releases.
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 }
 
 dependencies {
