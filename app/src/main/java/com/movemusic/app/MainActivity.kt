@@ -313,7 +313,7 @@ class MainActivity : ComponentActivity() {
             // The stroke is drawn 7dp from the overlay's right edge with a 2dp half-width.
             setPadding(
                 paddingLeft, paddingTop,
-                (14 * resources.displayMetrics.density).toInt(), paddingBottom
+                (11 * resources.displayMetrics.density).toInt(), paddingBottom
             )
             clipToPadding = false
         }
