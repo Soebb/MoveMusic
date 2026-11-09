@@ -3,6 +3,7 @@ package com.movemusic.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.RecoverableSecurityException
 import android.content.ContentUris
 import android.content.ComponentName
 import android.content.Intent
@@ -74,6 +75,7 @@ class MainActivity : Activity() {
     private var searchQuery = ""
     private var searchField: EditText? = null
     private var searchContainer: LinearLayout? = null
+    private val deleteRequestCode = 4102
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -293,6 +295,8 @@ class MainActivity : Activity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
+            setPadding(paddingLeft, paddingTop, (56 * resources.displayMetrics.density).toInt(), paddingBottom)
+            clipToPadding = false
         }
         songAdapter = SongAdapter()
         recycler.adapter = songAdapter
@@ -527,6 +531,7 @@ class MainActivity : Activity() {
             })
         } else {
             actions.addView(button("+ لیست") { addSong(song) })
+            actions.addView(button("حذف") { confirmDeleteSong(song) })
         }
         row.addView(actions)
         row.isClickable = true
@@ -557,6 +562,57 @@ class MainActivity : Activity() {
             if (song.id !in list) list.add(song.id)
             savePlaylists(); toast("به ${names[i]} اضافه شد.")
         }.show()
+    }
+
+    private fun confirmDeleteSong(song: Song) {
+        AlertDialog.Builder(this)
+            .setTitle("حذف آهنگ")
+            .setMessage("آیا مطمئنی می‌خواهی «" + song.title + "» را برای همیشه از گوشی حذف کنی؟")
+            .setNegativeButton("انصراف", null)
+            .setPositiveButton("حذف") { _, _ -> requestSongDeletion(song) }
+            .show()
+    }
+
+    private fun requestSongDeletion(song: Song) {
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                val request = MediaStore.createDeleteRequest(contentResolver, listOf(song.uri))
+                startIntentSenderForResult(request.intentSender, deleteRequestCode, null, 0, 0, 0)
+            } else {
+                val deleted = contentResolver.delete(song.uri, null, null)
+                if (deleted > 0) onSongDeleted(song) else toast("حذف آهنگ انجام نشد.")
+            }
+        } catch (e: RecoverableSecurityException) {
+            if (Build.VERSION.SDK_INT == 29) {
+                try {
+                    startIntentSenderForResult(e.userAction.actionIntent.intentSender, deleteRequestCode, null, 0, 0, 0)
+                } catch (_: Exception) { toast("درخواست مجوز حذف باز نشد.") }
+            } else toast("حذف آهنگ ممکن نشد.")
+        } catch (_: Exception) {
+            toast("حذف آهنگ ممکن نشد.")
+        }
+    }
+
+    private fun onSongDeleted(song: Song) {
+        songs.removeAll { it.id == song.id }
+        playlists.values.forEach { it.remove(song.id) }
+        savePlaylists()
+        if (currentSong?.id == song.id) {
+            try { player?.stop() } catch (_: Exception) {}
+            currentSong = null
+            playbackQueue = emptyList()
+            currentSongIndex = -1
+            miniPlayerHost?.removeAllViews()
+            miniPlayerHost?.visibility = View.GONE
+        } else playbackQueue = playbackQueue.filterNot { it.id == song.id }
+        refreshBody()
+        toast("آهنگ از گوشی حذف شد.")
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == deleteRequestCode && resultCode == RESULT_OK) loadSongsAsync()
     }
 
     private fun showPlaylistChooser() {
