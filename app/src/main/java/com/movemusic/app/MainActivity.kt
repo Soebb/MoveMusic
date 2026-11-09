@@ -494,66 +494,100 @@ class MainActivity : ComponentActivity() {
 
     private inner class SongAdapter : RecyclerView.Adapter<SongAdapter.SongHolder>() {
         private var items: List<Song> = emptyList()
-        inner class SongHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
+
+        inner class SongHolder(
+            val row: LinearLayout,
+            val titleView: TextView,
+            val artistView: TextView,
+            val addButton: TextView,
+            val transferButton: TextView,
+            val removeButton: TextView,
+            val deleteFileButton: TextView
+        ) : RecyclerView.ViewHolder(row) {
+            var boundSong: Song? = null
+        }
+
         fun setSongs(songs: List<Song>) {
             items = songs
             notifyDataSetChanged()
         }
+
         override fun getItemCount() = items.size
+
         override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): SongHolder {
-            val container = FrameLayout(this@MainActivity).apply {
-                // RecyclerView items must occupy the full available row width.
+            val row = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(10, 5, 6, 5)
+                setBackgroundColor(panel)
                 layoutParams = RecyclerView.LayoutParams(
                     RecyclerView.LayoutParams.MATCH_PARENT,
                     RecyclerView.LayoutParams.WRAP_CONTENT
                 )
             }
-            return SongHolder(container)
+            val details = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val title = TextView(this@MainActivity).apply {
+                textSize = 14f
+                setTextColor(white)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            val artist = TextView(this@MainActivity).apply {
+                textSize = 11f
+                setTextColor(muted)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            details.addView(title)
+            details.addView(artist)
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+
+            val actions = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            lateinit var holder: SongHolder
+            val add = songActionButton("+ لیست") {
+                holder.boundSong?.let { addSong(it) }
+            }
+            val transfer = songActionButton("انتقال") {
+                holder.boundSong?.let { moveSong(it) }
+            }
+            val remove = songActionButton("حذف") {
+                holder.boundSong?.let { song ->
+                    playlists[currentPlaylist]?.remove(song.id)
+                    savePlaylists()
+                    refreshBody()
+                }
+            }
+            val deleteFile = songActionButton("حذف") {
+                holder.boundSong?.let { confirmDeleteSong(it) }
+            }
+            actions.addView(add)
+            actions.addView(transfer)
+            actions.addView(remove)
+            actions.addView(deleteFile)
+            row.addView(actions)
+
+            holder = SongHolder(row, title, artist, add, transfer, remove, deleteFile)
+            row.setOnClickListener { holder.boundSong?.let { play(it) } }
+            return holder
         }
+
         override fun onBindViewHolder(holder: SongHolder, position: Int) {
             val song = items[position]
-            holder.container.removeAllViews()
-            holder.container.addView(buildSongRow(song), FrameLayout.LayoutParams(-1, -2))
+            holder.boundSong = song
+            holder.titleView.text = song.title
+            holder.artistView.text = song.artist
+            val inAllSongs = currentPlaylist == "همه آهنگ‌ها"
+            holder.addButton.visibility = if (inAllSongs) View.VISIBLE else View.GONE
+            holder.deleteFileButton.visibility = if (inAllSongs) View.VISIBLE else View.GONE
+            holder.transferButton.visibility = if (inAllSongs) View.GONE else View.VISIBLE
+            holder.removeButton.visibility = if (inAllSongs) View.GONE else View.VISIBLE
         }
-    }
-
-    private fun buildSongRow(song: Song): View {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(10, 5, 6, 5)
-            setBackgroundColor(panel)
-        }
-        val details = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        details.addView(TextView(this).apply {
-            text = song.title; textSize = 14f; setTextColor(white)
-            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-        details.addView(TextView(this).apply {
-            text = song.artist; textSize = 11f; setTextColor(muted)
-            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-        })
-        row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-        }
-        if (currentPlaylist != "همه آهنگ‌ها") {
-            actions.addView(songActionButton("انتقال") { moveSong(song) })
-            actions.addView(songActionButton("حذف") {
-                playlists[currentPlaylist]?.remove(song.id); savePlaylists(); refreshBody()
-            })
-        } else {
-            actions.addView(songActionButton("+ لیست") { addSong(song) })
-            actions.addView(songActionButton("حذف") { confirmDeleteSong(song) })
-        }
-        row.addView(actions)
-        row.isClickable = true
-        row.isFocusable = true
-        row.setOnClickListener { play(song) }
-        return row
     }
 
     private fun songActionButton(text: String, action: () -> Unit) = TextView(this).apply {
