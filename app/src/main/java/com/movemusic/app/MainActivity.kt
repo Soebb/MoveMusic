@@ -23,6 +23,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.ComponentActivity
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.RecyclerView
@@ -42,7 +43,7 @@ import coil3.size.Precision
 
 data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri)
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private val blue = 0xFF168BFF.toInt()
     private val bg = 0xFF05070B.toInt()
     private val panel = 0xFF111722.toInt()
