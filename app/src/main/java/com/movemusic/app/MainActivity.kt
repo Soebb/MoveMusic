@@ -309,7 +309,7 @@ class MainActivity : ComponentActivity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             itemAnimator = null
             setHasFixedSize(false)
-            setPadding(paddingLeft, paddingTop, (14 * resources.displayMetrics.density).toInt(), paddingBottom)
+            setPadding(paddingLeft, paddingTop, (7 * resources.displayMetrics.density).toInt(), paddingBottom)
             clipToPadding = false
         }
         songAdapter = SongAdapter()
@@ -780,20 +780,41 @@ class MainActivity : ComponentActivity() {
                 val nextItems = ((lastIndex + 1)..queueSnapshot.lastIndex)
                     .map { mediaItem(queueSnapshot[it]) }
 
-                runOnUiThread {
+                // Add the rest of the queue in small UI-thread batches.
+                // A single large addMediaItems() call can block input handling
+                // (including the system Back button) while the first tracks load.
+                val batchSize = 40
+                fun addPreviousBatch(endExclusive: Int) {
                     if (requestToken != playbackRequestToken || player !== controller ||
-                        controller.currentMediaItem?.mediaId != song.id.toString()) return@runOnUiThread
+                        controller.currentMediaItem?.mediaId != song.id.toString()) return
                     try {
-                        if (previousItems.isNotEmpty()) {
-                            controller.addMediaItems(0, previousItems)
+                        if (endExclusive <= 0) {
+                            addNextBatch(0)
+                            return
                         }
-                        if (nextItems.isNotEmpty()) {
-                            controller.addMediaItems(controller.currentMediaItemIndex + 1, nextItems)
-                        }
+                        val start = (endExclusive - batchSize).coerceAtLeast(0)
+                        controller.addMediaItems(0, previousItems.subList(start, endExclusive))
+                        uiHandler.post { addPreviousBatch(start) }
                     } catch (_: Exception) {
-                        // The selected track is already playing; queue
-                        // completion must not interrupt it.
+                        // Keep current playback running if queue completion fails.
                     }
+                }
+                fun addNextBatch(start: Int) {
+                    if (requestToken != playbackRequestToken || player !== controller ||
+                        controller.currentMediaItem?.mediaId != song.id.toString()) return
+                    try {
+                        if (start >= nextItems.size) return
+                        val end = (start + batchSize).coerceAtMost(nextItems.size)
+                        val insertionIndex = controller.currentMediaItemIndex + 1 +
+                            (start)
+                        controller.addMediaItems(insertionIndex, nextItems.subList(start, end))
+                        uiHandler.post { addNextBatch(end) }
+                    } catch (_: Exception) {
+                        // Keep current playback running if queue completion fails.
+                    }
+                }
+                runOnUiThread {
+                    addPreviousBatch(previousItems.size)
                 }
             } catch (_: Exception) {
                 // Keep current playback running if queue preparation fails.
