@@ -44,6 +44,9 @@ class PlaybackService : MediaSessionService() {
                 setHandleAudioBecomingNoisy(true)
                 setWakeMode(C.WAKE_MODE_LOCAL)
             }
+        // When shuffle is off, pause at the end of each track instead of
+        // automatically advancing through the queued playlist.
+        exoPlayer.setPauseAtEndOfMediaItems(true)
         player = exoPlayer
 
         val previousButton = CommandButton.Builder(CommandButton.ICON_PREVIOUS)
@@ -67,8 +70,21 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SET_SHUFFLE) {
+            val shuffleEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE_ENABLED, false)
+            player?.setPauseAtEndOfMediaItems(!shuffleEnabled)
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         mediaSession
+
+    companion object {
+        const val ACTION_SET_SHUFFLE = "com.movemusic.app.action.SET_SHUFFLE"
+        const val EXTRA_SHUFFLE_ENABLED = "shuffle_enabled"
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (player?.isPlaying != true) {
