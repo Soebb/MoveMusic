@@ -507,6 +507,11 @@ class MainActivity : ComponentActivity() {
         if (searchQuery.isEmpty()) {
             body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
                 shuffleEnabled = !shuffleEnabled
+                startService(
+                    Intent(this, PlaybackService::class.java)
+                        .setAction(PlaybackService.ACTION_SET_SHUFFLE)
+                        .putExtra(PlaybackService.EXTRA_SHUFFLE_ENABLED, shuffleEnabled)
+                )
                 refreshBody()
                 toast(if (shuffleEnabled) "پخش تصادفی فعال شد." else "پخش تصادفی غیرفعال شد.")
             })
