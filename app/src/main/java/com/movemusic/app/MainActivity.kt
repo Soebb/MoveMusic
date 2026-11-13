@@ -143,6 +143,7 @@ class MainActivity : ComponentActivity() {
         val song = songs.firstOrNull { it.uri == activeUri } ?: return
         val songChanged = currentSong?.id != song.id
         currentSong = song
+        if (songChanged) songAdapter?.notifyDataSetChanged()
         if (playbackQueue.isEmpty()) playbackQueue = songs
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         if (songChanged) prefetchAdjacentArtwork(currentSongIndex)
@@ -611,6 +612,9 @@ class MainActivity : ComponentActivity() {
             holder.boundSong = song
             holder.titleView.text = song.title
             holder.artistView.text = song.artist
+            holder.row.setBackgroundColor(
+                if (song.id == currentSong?.id) 0xFF29313D.toInt() else panel
+            )
             val inAllSongs = currentPlaylist == "همه آهنگ‌ها"
             holder.addButton.visibility = if (inAllSongs) View.VISIBLE else View.GONE
             holder.deleteFileButton.visibility = if (inAllSongs) View.VISIBLE else View.GONE
@@ -750,6 +754,7 @@ class MainActivity : ComponentActivity() {
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         currentSong = song
+        songAdapter?.notifyDataSetChanged()
         prefetchAdjacentArtwork(currentSongIndex)
         showPlayerScreen()
         startSong(song)
