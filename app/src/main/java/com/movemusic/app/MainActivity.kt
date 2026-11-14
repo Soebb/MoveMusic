@@ -1178,7 +1178,7 @@ class MainActivity : ComponentActivity() {
             val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
             // Do not seek by library index: the player timeline is assembled
             // asynchronously and may currently contain only nearby tracks.
-            play(playbackQueue[target])
+            play(playbackQueue[target], openPlayerScreen = false)
         } else {
             controller.seekToNextMediaItem()
         }
