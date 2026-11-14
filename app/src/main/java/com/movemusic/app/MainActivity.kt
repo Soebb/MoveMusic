@@ -504,6 +504,9 @@ class MainActivity : ComponentActivity() {
                 toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
                       else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
             })
+            body.addView(button("کپی کامل این پلی‌لیست به…") {
+                copyCurrentPlaylistToAnother()
+            })
         }
         if (searchQuery.isEmpty()) {
             body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
@@ -720,6 +723,31 @@ class MainActivity : ComponentActivity() {
         } else playbackQueue = playbackQueue.filterNot { it.id == song.id }
         refreshBody()
         toast("آهنگ از گوشی حذف شد.")
+    }
+
+    private fun copyCurrentPlaylistToAnother() {
+        val sourceName = currentPlaylist
+        val source = playlists[sourceName] ?: return
+        val destinations = playlists.keys.filter { it != sourceName }.toTypedArray()
+        if (destinations.isEmpty()) {
+            toast("برای کپی، ابتدا یک پلی‌لیست دیگر بساز.")
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("کپی پلی‌لیست «$sourceName» به")
+            .setItems(destinations) { _, which ->
+                val target = playlists[destinations[which]] ?: return@setItems
+                val existingIds = target.toHashSet()
+                val newIds = source.filter { existingIds.add(it) }
+                target.addAll(newIds)
+                savePlaylists()
+                toast(
+                    if (newIds.isEmpty()) "تمام آهنگ‌های این پلی‌لیست از قبل در مقصد هستند."
+                    else "${newIds.size} آهنگ به «${destinations[which]}» کپی شد."
+                )
+            }
+            .show()
     }
 
     private fun showPlaylistChooser() {
