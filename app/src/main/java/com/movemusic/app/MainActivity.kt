@@ -499,14 +499,21 @@ class MainActivity : ComponentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
             }
             playlistActions.addView(button("افزودن همه آهنگ‌ها") {
-                val target = playlists[currentPlaylist] ?: return@button
-                val existingIds = target.toHashSet()
-                val newSongs = songs.filter { existingIds.add(it.id) }
-                target.addAll(newSongs.map { it.id })
-                savePlaylists()
-                refreshBody()
-                toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
-                      else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
+                AlertDialog.Builder(this)
+                    .setTitle("افزودن همه آهنگ‌ها")
+                    .setMessage("آیا مطمئنی می‌خواهی همه آهنگ‌های کتابخانه به این پلی‌لیست اضافه شوند؟")
+                    .setNegativeButton("انصراف", null)
+                    .setPositiveButton("بله، اضافه کن") { _, _ ->
+                        val target = playlists[currentPlaylist] ?: return@setPositiveButton
+                        val existingIds = target.toHashSet()
+                        val newSongs = songs.filter { existingIds.add(it.id) }
+                        target.addAll(newSongs.map { it.id })
+                        savePlaylists()
+                        refreshBody()
+                        toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
+                              else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
+                    }
+                    .show()
             }, LinearLayout.LayoutParams(0, -2, 1f))
             playlistActions.addView(button("کپی کامل به…") {
                 copyCurrentPlaylistToAnother()
