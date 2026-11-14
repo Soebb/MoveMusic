@@ -789,7 +789,7 @@ class MainActivity : ComponentActivity() {
         currentSong = song
         songAdapter?.notifyDataSetChanged()
         prefetchAdjacentArtwork(currentSongIndex)
-        if (openPlayerScreen) showPlayerScreen()
+        if (openPlayerScreen || playerScreenVisible) showPlayerScreen()
         startSong(song)
     }
 
