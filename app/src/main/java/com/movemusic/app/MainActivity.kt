@@ -1129,7 +1129,10 @@ class MainActivity : ComponentActivity() {
         if (playbackQueue.isEmpty() || currentSongIndex !in playbackQueue.indices) return
         if (shuffleEnabled && playbackQueue.size > 1) {
             val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
-            controller.seekTo(target, 0L)
+            // The player timeline is populated in batches, so a library index
+            // is not necessarily a valid player timeline index. Start the
+            // selected song through the normal queue setup instead.
+            play(playbackQueue[target])
         } else {
             controller.seekToPreviousMediaItem()
         }
@@ -1140,7 +1143,9 @@ class MainActivity : ComponentActivity() {
         if (playbackQueue.size < 2 || currentSongIndex !in playbackQueue.indices) return
         if (shuffleEnabled) {
             val target = (playbackQueue.indices.filter { it != currentSongIndex }).random()
-            controller.seekTo(target, 0L)
+            // Do not seek by library index: the player timeline is assembled
+            // asynchronously and may currently contain only nearby tracks.
+            play(playbackQueue[target])
         } else {
             controller.seekToNextMediaItem()
         }
