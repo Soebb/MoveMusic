@@ -494,7 +494,11 @@ class MainActivity : ComponentActivity() {
         val allVisibleSongs = visibleSongSource()
         visibleSongsCache = allVisibleSongs
         if (currentPlaylist != "همه آهنگ‌ها" && searchQuery.isEmpty()) {
-            body.addView(button("افزودن همه آهنگ‌ها به این پلی‌لیست") {
+            val playlistActions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            playlistActions.addView(button("افزودن همه آهنگ‌ها") {
                 val target = playlists[currentPlaylist] ?: return@button
                 val existingIds = target.toHashSet()
                 val newSongs = songs.filter { existingIds.add(it.id) }
@@ -503,10 +507,11 @@ class MainActivity : ComponentActivity() {
                 refreshBody()
                 toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
                       else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
-            })
-            body.addView(button("کپی کامل این پلی‌لیست به…") {
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            playlistActions.addView(button("کپی کامل به…") {
                 copyCurrentPlaylistToAnother()
-            })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            body.addView(playlistActions)
         }
         if (searchQuery.isEmpty()) {
             body.addView(button(if (shuffleEnabled) "پخش تصادفی: روشن" else "پخش تصادفی: خاموش") {
@@ -770,7 +775,7 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
 
-    private fun play(song: Song) {
+    private fun play(song: Song, openPlayerScreen: Boolean = true) {
         playbackQueue = if (currentPlaylist == "همه آهنگ‌ها") {
             // Reuse the loaded library instead of copying it on every tap.
             songs
@@ -784,7 +789,7 @@ class MainActivity : ComponentActivity() {
         currentSong = song
         songAdapter?.notifyDataSetChanged()
         prefetchAdjacentArtwork(currentSongIndex)
-        showPlayerScreen()
+        if (openPlayerScreen) showPlayerScreen()
         startSong(song)
     }
 
@@ -1160,7 +1165,7 @@ class MainActivity : ComponentActivity() {
             // The player timeline is populated in batches, so a library index
             // is not necessarily a valid player timeline index. Start the
             // selected song through the normal queue setup instead.
-            play(playbackQueue[target])
+            play(playbackQueue[target], openPlayerScreen = false)
         } else {
             controller.seekToPreviousMediaItem()
         }
