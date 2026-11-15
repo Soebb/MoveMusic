@@ -498,6 +498,10 @@ class MainActivity : ComponentActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
+            val playlistButtonParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                marginStart = (2 * resources.displayMetrics.density).toInt()
+                marginEnd = (2 * resources.displayMetrics.density).toInt()
+            }
             playlistActions.addView(button("افزودن همه آهنگ‌ها") {
                 AlertDialog.Builder(this)
                     .setTitle("افزودن همه آهنگ‌ها")
@@ -514,10 +518,10 @@ class MainActivity : ComponentActivity() {
                               else "${newSongs.size} آهنگ به پلی‌لیست اضافه شد.")
                     }
                     .show()
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+            }, playlistButtonParams)
             playlistActions.addView(button("کپی کامل به…") {
                 copyCurrentPlaylistToAnother()
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+            }, playlistButtonParams)
             body.addView(playlistActions)
         }
         if (searchQuery.isEmpty()) {
