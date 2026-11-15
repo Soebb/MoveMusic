@@ -44,9 +44,18 @@ class PlaybackService : MediaSessionService() {
                 setHandleAudioBecomingNoisy(true)
                 setWakeMode(C.WAKE_MODE_LOCAL)
             }
-        // When shuffle is off, pause at the end of each track instead of
-        // automatically advancing through the queued playlist.
+        // Shuffle mode uses ExoPlayer's shuffled timeline for automatic
+        // transitions, and repeats the shuffled queue after its last item.
         exoPlayer.setPauseAtEndOfMediaItems(true)
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                if (exoPlayer.shuffleModeEnabled && exoPlayer.hasNextMediaItem()) {
+                    exoPlayer.seekToNextMediaItem()
+                    exoPlayer.prepare()
+                    exoPlayer.play()
+                }
+            }
+        })
         player = exoPlayer
 
         val previousButton = CommandButton.Builder(CommandButton.ICON_PREVIOUS)
@@ -73,7 +82,11 @@ class PlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_SET_SHUFFLE) {
             val shuffleEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE_ENABLED, false)
-            player?.setPauseAtEndOfMediaItems(!shuffleEnabled)
+            player?.let {
+                it.shuffleModeEnabled = shuffleEnabled
+                it.repeatMode = if (shuffleEnabled) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+                it.setPauseAtEndOfMediaItems(true)
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
