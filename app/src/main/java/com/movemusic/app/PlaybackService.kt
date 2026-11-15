@@ -85,7 +85,7 @@ class PlaybackService : MediaSessionService() {
             player?.let {
                 it.shuffleModeEnabled = shuffleEnabled
                 it.repeatMode = if (shuffleEnabled) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
-                it.setPauseAtEndOfMediaItems(true)
+                it.setPauseAtEndOfMediaItems(!shuffleEnabled)
             }
         }
         return super.onStartCommand(intent, flags, startId)
