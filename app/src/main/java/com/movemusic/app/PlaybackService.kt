@@ -49,7 +49,7 @@ class PlaybackService : MediaSessionService() {
         exoPlayer.setPauseAtEndOfMediaItems(true)
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                if (exoPlayer.shuffleModeEnabled && exoPlayer.hasNextMediaItem()) {
+                if (exoPlayer.shuffleModeEnabled && exoPlayer.mediaItemCount > 1 && exoPlayer.hasNextMediaItem()) {
                     exoPlayer.seekToNextMediaItem()
                     exoPlayer.prepare()
                     exoPlayer.play()
