@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.RecoverableSecurityException
+import android.content.ClipData
 import android.content.ContentUris
 import android.content.ComponentName
 import android.content.Intent
@@ -623,6 +624,15 @@ class MainActivity : ComponentActivity() {
 
             holder = SongHolder(row, title, artist, add, transfer, remove, deleteFile)
             row.setOnClickListener { holder.boundSong?.let { play(it) } }
+            row.setOnLongClickListener {
+                val song = holder.boundSong
+                if (song != null) {
+                    shareSong(song)
+                    true
+                } else {
+                    false
+                }
+            }
             return holder
         }
 
@@ -639,6 +649,21 @@ class MainActivity : ComponentActivity() {
             holder.deleteFileButton.visibility = if (inAllSongs) View.VISIBLE else View.GONE
             holder.transferButton.visibility = if (inAllSongs) View.GONE else View.VISIBLE
             holder.removeButton.visibility = if (inAllSongs) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun shareSong(song: Song) {
+        try {
+            val mimeType = contentResolver.getType(song.uri) ?: "audio/*"
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = mimeType
+                putExtra(Intent.EXTRA_STREAM, song.uri)
+                clipData = ClipData.newUri(contentResolver, song.title, song.uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, "اشتراک‌گذاری آهنگ"))
+        } catch (_: Exception) {
+            toast("اشتراک‌گذاری این آهنگ ممکن نشد.")
         }
     }
 
