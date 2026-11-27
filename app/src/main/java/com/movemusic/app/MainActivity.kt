@@ -187,7 +187,13 @@ class MainActivity : ComponentActivity() {
         Thread {
             val loadedSongs = mutableListOf<Song>()
             try {
-                val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                val collections = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    MediaStore.getExternalVolumeNames(this).map { volumeName ->
+                        MediaStore.Audio.Media.getContentUri(volumeName)
+                    }
+                } else {
+                    listOf(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+                }
                 val projection = arrayOf(
                     MediaStore.Audio.Media._ID,
                     MediaStore.Audio.Media.TITLE,
@@ -198,15 +204,16 @@ class MainActivity : ComponentActivity() {
                     MediaStore.Audio.Media.DURATION,
                     MediaStore.Audio.Media.SIZE
                 )
-                contentResolver.query(
-                    collection,
-                    projection,
-                    """${MediaStore.Audio.Media.IS_MUSIC} != 0
-                        OR ${MediaStore.Audio.Media.MIME_TYPE} IN ('audio/wav', 'audio/x-wav', 'audio/vnd.wave', 'audio/wave')
-                        OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%.wav'""".trimIndent(),
-                    null,
-                    "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
-                )?.use { cursor ->
+                collections.forEach { collection ->
+                    contentResolver.query(
+                        collection,
+                        projection,
+                        """${MediaStore.Audio.Media.IS_MUSIC} != 0
+                            OR ${MediaStore.Audio.Media.MIME_TYPE} IN ('audio/wav', 'audio/x-wav', 'audio/vnd.wave', 'audio/wave')
+                            OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%.wav'""".trimIndent(),
+                        null,
+                        "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+                    )?.use { cursor ->
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                     val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                     val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -228,6 +235,7 @@ class MainActivity : ComponentActivity() {
                                 stableTrackKey(title, artist, displayName, duration, size)
                             )
                         )
+                    }
                     }
                 }
                 runOnUiThread {
@@ -401,7 +409,9 @@ class MainActivity : ComponentActivity() {
     private fun visibleSongSource(): List<Song> {
         val playlistKeys = if (currentPlaylist == "همه آهنگ‌ها") null
             else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-        val source = songs.asSequence().filter { playlistKeys == null || it.stableKey in playlistKeys }
+        val source = songs.asSequence()
+            .filter { playlistKeys == null || it.stableKey in playlistKeys }
+            .distinctBy { if (playlistKeys == null) it.id.toString() else it.stableKey }
         val terms = searchQuery.trim()
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
@@ -861,7 +871,7 @@ class MainActivity : ComponentActivity() {
             // Use a hash set for membership checks. List.contains() here made
             // playlist startup increasingly slow as both library and playlist grew.
             val playlistKeys = (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-            songs.filter { it.stableKey in playlistKeys }
+            songs.filter { it.stableKey in playlistKeys }.distinctBy { it.stableKey }
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         currentSong = song
