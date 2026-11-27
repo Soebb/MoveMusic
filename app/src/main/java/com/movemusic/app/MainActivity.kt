@@ -42,7 +42,7 @@ import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.size.Precision
 
-data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri)
+data class Song(val id: Long, val title: String, val artist: String, val albumId: Long, val uri: Uri, val stableKey: String)
 
 class MainActivity : ComponentActivity() {
     private val blue = 0xFF168BFF.toInt()
@@ -51,7 +51,8 @@ class MainActivity : ComponentActivity() {
     private val white = 0xFFF2F6FC.toInt()
     private val muted = 0xFF9AA8B8.toInt()
     private val prefs by lazy { getSharedPreferences("movemusic", Context.MODE_PRIVATE) }
-    private val playlists = linkedMapOf<String, MutableList<Long>>()
+    private val playlists = linkedMapOf<String, MutableList<String>>()
+    private val legacyPlaylistIds = linkedMapOf<String, MutableList<Long>>()
     private val songs = mutableListOf<Song>()
     private var currentPlaylist = "همه آهنگ‌ها"
     private var displayedSongCount = 50
@@ -192,7 +193,10 @@ class MainActivity : ComponentActivity() {
                     MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.ARTIST,
                     MediaStore.Audio.Media.ALBUM_ID,
-                    MediaStore.Audio.Media.IS_MUSIC
+                    MediaStore.Audio.Media.IS_MUSIC,
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.SIZE
                 )
                 contentResolver.query(
                     collection,
@@ -207,15 +211,21 @@ class MainActivity : ComponentActivity() {
                     val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                     val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
                     val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val displayNameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
+                        val title = cursor.getString(titleCol) ?: "بدون عنوان"
+                        val artist = cursor.getString(artistCol) ?: "هنرمند نامشخص"
+                        val displayName = cursor.getString(displayNameCol) ?: title
+                        val duration = cursor.getLong(durationCol)
+                        val size = cursor.getLong(sizeCol)
                         loadedSongs.add(
                             Song(
-                                id,
-                                cursor.getString(titleCol) ?: "بدون عنوان",
-                                cursor.getString(artistCol) ?: "هنرمند نامشخص",
-                                cursor.getLong(albumIdCol),
-                                ContentUris.withAppendedId(collection, id)
+                                id, title, artist, cursor.getLong(albumIdCol),
+                                ContentUris.withAppendedId(collection, id),
+                                stableTrackKey(title, artist, displayName, duration, size)
                             )
                         )
                     }
@@ -223,6 +233,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     songs.clear()
                     songs.addAll(loadedSongs)
+                    migrateLegacyPlaylistIds()
                     displayedSongCount = 50
                     restorePlaybackState()
                     render()
@@ -237,12 +248,22 @@ class MainActivity : ComponentActivity() {
 
     private fun loadPlaylists() {
         playlists.clear()
+        legacyPlaylistIds.clear()
         val raw = prefs.getString("lists", null)
         if (raw != null) try {
             val obj = JSONObject(raw)
             obj.keys().forEach { name ->
                 val arr = obj.getJSONArray(name)
-                playlists[name] = MutableList(arr.length()) { i -> arr.getLong(i) }
+                val stableKeys = mutableListOf<String>()
+                val oldIds = mutableListOf<Long>()
+                for (i in 0 until arr.length()) {
+                    when (val value = arr.opt(i)) {
+                        is Number -> oldIds.add(value.toLong())
+                        is String -> stableKeys.add(value)
+                    }
+                }
+                playlists[name] = stableKeys
+                if (oldIds.isNotEmpty()) legacyPlaylistIds[name] = oldIds
             }
         } catch (_: Exception) {}
         if (playlists.isEmpty()) {
@@ -250,6 +271,27 @@ class MainActivity : ComponentActivity() {
             playlists["آرام"] = mutableListOf()
             savePlaylists()
         }
+    }
+
+    private fun stableTrackKey(title: String, artist: String, displayName: String, duration: Long, size: Long): String {
+        // Exclude path and MediaStore ID so a moved file retains its playlist identity.
+        val identity = listOf(title, artist, displayName, duration.toString(), size.toString())
+            .joinToString("\u001F") { it.trim().lowercase(java.util.Locale.ROOT) }
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun migrateLegacyPlaylistIds() {
+        if (legacyPlaylistIds.isEmpty()) return
+        legacyPlaylistIds.forEach { (name, oldIds) ->
+            val target = playlists.getOrPut(name) { mutableListOf() }
+            oldIds.forEach { oldId ->
+                val key = songs.firstOrNull { it.id == oldId }?.stableKey
+                if (key != null && key !in target) target.add(key)
+            }
+        }
+        legacyPlaylistIds.clear()
+        savePlaylists()
     }
 
     private fun savePlaylists() {
@@ -357,9 +399,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun visibleSongSource(): List<Song> {
-        val playlistIds = if (currentPlaylist == "همه آهنگ‌ها") null
+        val playlistKeys = if (currentPlaylist == "همه آهنگ‌ها") null
             else (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-        val source = songs.asSequence().filter { playlistIds == null || it.id in playlistIds }
+        val source = songs.asSequence().filter { playlistKeys == null || it.stableKey in playlistKeys }
         val terms = searchQuery.trim()
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
@@ -510,9 +552,9 @@ class MainActivity : ComponentActivity() {
                     .setNegativeButton("انصراف", null)
                     .setPositiveButton("بله، اضافه کن") { _, _ ->
                         val target = playlists[currentPlaylist] ?: return@setPositiveButton
-                        val existingIds = target.toHashSet()
-                        val newSongs = songs.filter { existingIds.add(it.id) }
-                        target.addAll(newSongs.map { it.id })
+                        val existingKeys = target.toHashSet()
+                        val newSongs = songs.filter { existingKeys.add(it.stableKey) }
+                        target.addAll(newSongs.map { it.stableKey })
                         savePlaylists()
                         refreshBody()
                         toast(if (newSongs.isEmpty()) "همه آهنگ‌ها از قبل در این پلی‌لیست هستند."
@@ -608,7 +650,7 @@ class MainActivity : ComponentActivity() {
             }
             val remove = songActionButton("حذف") {
                 holder.boundSong?.let { song ->
-                    playlists[currentPlaylist]?.remove(song.id)
+                    playlists[currentPlaylist]?.remove(song.stableKey)
                     savePlaylists()
                     refreshBody()
                 }
@@ -697,8 +739,8 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this).setTitle("انتقال به پلی‌لیست")
             .setItems(destinations) { _, which ->
                 val target = destinations[which]
-                if (song.id !in playlists[target]!!) playlists[target]!!.add(song.id)
-                playlists[currentPlaylist]?.remove(song.id)
+                if (song.stableKey !in playlists[target]!!) playlists[target]!!.add(song.stableKey)
+                playlists[currentPlaylist]?.remove(song.stableKey)
                 savePlaylists()
                 refreshBody()
                 toast("آهنگ منتقل شد.")
@@ -710,7 +752,7 @@ class MainActivity : ComponentActivity() {
         if (names.isEmpty()) return
         AlertDialog.Builder(this).setTitle("افزودن به پلی‌لیست").setItems(names) { _, i ->
             val list = playlists[names[i]]!!
-            if (song.id !in list) list.add(song.id)
+            if (song.stableKey !in list) list.add(song.stableKey)
             savePlaylists(); toast("به ${names[i]} اضافه شد.")
         }.show()
     }
@@ -752,7 +794,7 @@ class MainActivity : ComponentActivity() {
 
     private fun onSongDeleted(song: Song) {
         songs.removeAll { it.id == song.id }
-        playlists.values.forEach { it.remove(song.id) }
+        playlists.values.forEach { it.remove(song.stableKey) }
         savePlaylists()
         if (currentSong?.id == song.id) {
             try { player?.stop() } catch (_: Exception) {}
@@ -818,8 +860,8 @@ class MainActivity : ComponentActivity() {
         } else {
             // Use a hash set for membership checks. List.contains() here made
             // playlist startup increasingly slow as both library and playlist grew.
-            val playlistIds = (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
-            songs.filter { it.id in playlistIds }
+            val playlistKeys = (playlists[currentPlaylist] ?: mutableListOf()).toHashSet()
+            songs.filter { it.stableKey in playlistKeys }
         }
         currentSongIndex = playbackQueue.indexOfFirst { it.id == song.id }
         currentSong = song
